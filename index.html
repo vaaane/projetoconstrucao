@@ -3751,7 +3751,7 @@ function renderEntregasProf(){
         <div style="margin-top:8px;text-align:center;">
           ${isMeu?`<button onclick="marcarEntregue('${gKey}','${cKey}')" class="btn-success" style="width:100%;padding:8px;font-size:13px;">✓ Confirmar entrega</button>`
                 :`<div style="font-size:11px;color:#94a3b8;padding:6px;">Somente o prof. da turma.</div>`}
-          ${isMeu&&isLoja?`<button onclick="cancelarNotaFiscal('${gKey}','${cKey}')" style="width:100%;padding:6px;font-size:12px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;margin-top:4px;">✕ Cancelar nota</button>`:''}
+          ${isMeu&&isLoja?`<button onclick="cancelarNotaFiscal('${gKey}','${cKey}','recusa')" style="width:100%;padding:6px;font-size:12px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;margin-top:4px;">✕ Recusar compra</button>`:''}
         </div>
       </div>`;
     });
@@ -3763,9 +3763,10 @@ function renderEntregasProf(){
       <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
     entregues.forEach(({gKey,cKey,c,gNome,isMeu})=>{
       const isLoja=!c.via;
-      h+=`<div class="nf-item" style="border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;padding:10px;opacity:.85;">
+      const btnX=isMeu&&isLoja?`<button onclick="cancelarNotaFiscal('${gKey}','${cKey}','cancelamento')" title="Cancelar nota" style="position:absolute;top:6px;right:6px;width:22px;height:22px;padding:0;font-size:12px;font-weight:700;line-height:1;color:#9ca3af;background:transparent;border:1px solid #e5e7eb;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:1;" onmouseover="this.style.color='#dc2626';this.style.borderColor='#fecaca';this.style.background='#fef2f2'" onmouseout="this.style.color='#9ca3af';this.style.borderColor='#e5e7eb';this.style.background='transparent'">✕</button>`:'';
+      h+=`<div class="nf-item" style="position:relative;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;padding:10px;opacity:.85;">
+        ${btnX}
         ${renderNF(c,gNome)}
-        ${isMeu&&isLoja?`<div style="margin-top:8px;text-align:center;"><button onclick="cancelarNotaFiscal('${gKey}','${cKey}')" style="width:100%;padding:6px;font-size:12px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">✕ Cancelar nota</button></div>`:''}
       </div>`;
     });
     h+='</div></div>';
@@ -3801,12 +3802,15 @@ function renderEntregasProf(){
 async function marcarEntregue(gKey,cKey){
   await db.ref(`grupos/${gKey}/compras/${cKey}/entregue`).set(true);
 }
-async function cancelarNotaFiscal(gKey,cKey){
+async function cancelarNotaFiscal(gKey,cKey,modo='cancelamento'){
   const g=ST.grupos[gKey]; if(!g) return;
   const c=g.compras?.[cKey]; if(!c) return;
   if(c.cancelada){showToast('Esta nota já foi cancelada.');return;}
   if(c.via){showToast('Só é possível cancelar compras de loja.');return;}
-  if(!confirm(`Cancelar ${c.id}?\nO dinheiro (${fmt(c.total)}) volta ao grupo e o material volta ao estoque.\nEssa ação não pode ser desfeita.`)) return;
+  const msg=modo==='recusa'
+    ?`Recusar esta compra?\nO material volta ao estoque e o valor volta ao grupo.\nNão pode ser desfeito.`
+    :`Cancelar esta nota já entregue?\nO material volta ao estoque e o valor volta ao grupo.\nNão pode ser desfeito.`;
+  if(!confirm(msg)) return;
   const upd={};
   upd[`grupos/${gKey}/saldo`]=(g.saldo||0)+c.total;
   upd[`grupos/${gKey}/compras/${cKey}/cancelada`]=true;
