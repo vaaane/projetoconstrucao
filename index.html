@@ -814,7 +814,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // ── ESTADO LOCAL (mirror do Firebase) ────────────────
-let ST = { grupos:{}, materiais:{}, transacoes:[], propostas:{}, feed:[], config:{saldoInicial:60000}, filaAcoes:{}, limiteDiario:{}, matInfo:{}, historicoPrecos:{}, kits:{}, chamada:{} };
+let ST = { grupos:{}, materiais:{}, transacoes:[], propostas:{}, feed:[], config:{saldoInicial:60000}, filaAcoes:{}, matInfo:{}, historicoPrecos:{}, kits:{}, chamada:{} };
 let _ultimaAcaoInfo = null;
 let cartState = {}; // {mKey: qty}
 
@@ -1069,7 +1069,7 @@ function renderNF(compra, grupoNome) {
 
 // ── DADOS PADRÃO ──────────────────────────────────────
 const DADOS_INICIAIS = {
-  config: { saldoInicial: 60000, limiteDiarioPadrao: 50, limiteTransacao: 20 },
+  config: { saldoInicial: 60000 },
   professores: {
     'prof_ana':    { nome:'Prof. Ana',    turma:'8º A' },
     'prof_carlos': { nome:'Prof. Carlos', turma:'8º B' },
@@ -1165,7 +1165,6 @@ function setupListeners() {
     scheduleRender();
   });
   db.ref('filaAcoes').on('value', s => { ST.filaAcoes=s.val()||{}; scheduleRender(); });
-  db.ref('limiteDiario').on('value', s => { ST.limiteDiario=s.val()||{}; scheduleRender(); });
   db.ref('matInfo').on('value', s => { ST.matInfo=s.val()||{}; scheduleRender(); });
   db.ref('kits').on('value', s => { ST.kits=s.val()||{}; scheduleRender(); });
   // Listener para item raro disponível
@@ -1817,8 +1816,6 @@ function renderLoja(){
     return;
   }
   const gKey=getGrupoKey(grupoAtual)||'';
-  const limTrans=ST.config?.limiteTransacao??20;
-  const hoje=new Date().toISOString().slice(0,10);
   const cartTotal=Object.entries(cartState).reduce((a,[k,q])=>a+q*(getPrecoAtual(ST.materiais[k]?.nome||'')||0),0);
   const cartCount=Object.values(cartState).reduce((a,b)=>a+b,0);
   const cartBarHtml=cartCount>0?`<div class="cart-bar" onclick="tabA('carrinho')">
@@ -1861,7 +1858,6 @@ function renderLoja(){
 
   // Rebuild cards with filtered/sorted list
   const filteredCards=matEntries.map(([mKey,m])=>{
-    const limDiario=Math.max(1,Math.floor((ESTOQUE_INICIAL[mKey]||100)*0.20));
     const preco=getPrecoAtual(m.nome), al=getAcaoLabel(m.nome);
     const indisponivel=m.acao?.tipo==='indisponivel'&&m.acao.fimTs>Date.now();
     const semEstoque=m.estoque<=0||indisponivel;
@@ -1869,14 +1865,7 @@ function renderLoja(){
     const isOferta=al&&m.acao?.tipo==='oferta';
     const isAlta=al&&m.acao?.tipo==='alta';
     const isEscassez=al&&m.acao?.tipo==='escassez';
-    const limData=ST.limiteDiario?.[gKey]?.[mKey]||{qty:0,data:''};
-    const usadoHoje=limData.data===hoje?limData.qty:0;
-    const restanteDia=Math.max(0,limDiario-usadoHoje);
-    const limiteAtingido=restanteDia<=0;
-    const maxInput=Math.min(m.estoque,limTrans,restanteDia);
-    const limBarPct=Math.min(100,Math.round((usadoHoje/limDiario)*100));
-    const limCorBar=limBarPct>=90?'#dc2626':limBarPct>=60?'#d97706':'#2563eb';
-    const limBarHtml=usadoHoje>0?`<div style="height:3px;background:#f1f5f9;border-radius:2px;margin:4px 0 2px;"><div style="height:100%;width:${limBarPct}%;background:${limCorBar};border-radius:2px;"></div></div><div style="font-size:8px;color:${limCorBar};">${usadoHoje}/${limDiario} hoje</div>`:'';
+    const maxInput=m.estoque;
     const cb=(bg,txt,big)=>`<div class="prod-corner-badge" style="background:${bg};${big?'font-size:11px;padding:4px 8px;':''}">
 ${txt}</div>`;
     const isNovo=m._novoAte&&m._novoAte>Date.now();
@@ -1884,7 +1873,6 @@ ${txt}</div>`;
     if(isRaroAtivo(m)&&!semEstoque)  cornerBadge=cb('linear-gradient(135deg,#ca8a04,#78350f)','✨ RARO',true);
     else if(isNovo)          cornerBadge=cb('linear-gradient(135deg,#2563eb,#1d4ed8)','🆕 Novo!',false);
     else if(indisponivel)    cornerBadge=cb('#dc2626','🚫 Indisp.',false);
-    else if(limiteAtingido)  cornerBadge=cb('#64748b','Limite',false);
     else if(isOferta)        cornerBadge=cb('#16a34a',`🏷️ -${m.acao?.pct}%`,false);
     else if(isAlta)          cornerBadge=cb('#dc2626',`📈 +${m.acao?.pct}%`,false);
     else if(isEscassez)      cornerBadge=cb('#d97706','⚠️ Escassez',false);
@@ -1895,7 +1883,7 @@ ${txt}</div>`;
     </div>`:'';
     const economizePill=isOferta&&economia>0?`<div style="font-size:8px;color:#16a34a;font-weight:700;">🏷️ Economize ${fmt(economia)}</div>`:isAlta&&economia>0?`<div style="font-size:8px;color:#dc2626;font-weight:700;">📈 Alta de ${fmt(economia)}</div>`:'';
     const precoCor=isOferta?'#16a34a':isAlta?'#dc2626':'#1e293b';
-    const bloqueado=semEstoque||limiteAtingido;
+    const bloqueado=semEstoque;
     const infoEmoji=m.emoji||info.emoji||'📦';
     const infoBg=m.bg||info.bg||'#f8fafc';
     const noCarrinho=cartState[mKey]||0;
@@ -1927,7 +1915,6 @@ ${txt}</div>`;
         ${precoOrigHtml}
         <div class="prod-preco" style="color:${semEstoque?'#94a3b8':precoCor};">${fmt(preco)}</div>
         ${estoqueLabel}
-        ${limBarHtml}
         ${cartInfo}
       </div>
       <div class="prod-actions">
@@ -1935,13 +1922,10 @@ ${txt}</div>`;
           ?`<div style="text-align:center;padding:10px 0;font-size:12px;font-weight:700;color:#94a3b8;">Fora de estoque</div>`
           :`<div class="qty-row">
           <button class="qty-btn" onclick="(()=>{const i=document.getElementById('qty-${mKey}');if(i&&parseInt(i.value)>0)i.value=parseInt(i.value)-1;})()">−</button>
-          <input type="number" min="0" max="${maxInput}" value="0" id="qty-${mKey}" class="qty-field" ${limiteAtingido?'disabled':''} placeholder="0">
+          <input type="number" min="0" max="${maxInput}" value="0" id="qty-${mKey}" class="qty-field" placeholder="0">
           <button class="qty-btn" onclick="(()=>{const i=document.getElementById('qty-${mKey}');if(i)i.value=Math.min(parseInt(i.value||0)+1,${maxInput});})()">+</button>
         </div>
-        <button class="btn-add-cart" onclick="addToCart('${mKey}')" ${limiteAtingido?'disabled':''}>
-          ${limiteAtingido?'Limite atingido':'+ Adicionar ao Carrinho'}
-        </button>`}
-        <button onclick="verExemplos('${mKey}')" style="font-size:9px;color:#94a3b8;background:none;border:none;cursor:pointer;width:100%;text-align:center;">ver exemplos ↗</button>
+        <button class="btn-add-cart" onclick="addToCart('${mKey}')">+ Adicionar ao Carrinho</button>`}
       </div>
     </div>`;
   }).join('');
@@ -2045,21 +2029,6 @@ async function confirmarCompraKit(kKey){
 function atualizarTotalCarrinho(){
   updateCartBadge();
 }
-function verExemplos(mKey){
-  const m=ST.materiais[mKey]; if(!m) return;
-  const staticInfo=MAT_INFO[mKey]||{};
-  const emoji=m.emoji||staticInfo.emoji||'📦';
-  const bg=m.bg||staticInfo.bg||'#f8fafc';
-  const exemplos=ST.matInfo[mKey]?.exemplos||staticInfo.exemplos||'Nenhum exemplo cadastrado ainda.';
-  abrirModal(`${emoji} ${m.nome}`,`
-    <div style="text-align:center;padding:1rem 0;">
-      <div style="font-size:56px;margin-bottom:8px;background:${bg};border-radius:12px;padding:1rem;">${emoji}</div>
-      <div style="font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Exemplos de utilização na maquete</div>
-      <div style="font-size:14px;color:#0f172a;line-height:1.6;text-align:left;">${exemplos}</div>
-      <div style="font-size:10px;color:#94a3b8;margin-top:12px;background:#f8fafc;border-radius:6px;padding:6px 8px;text-align:left;">Chave Firebase: <code style="font-size:10px;color:#2563eb;">${mKey}</code> · Imagem: <code style="font-size:10px;color:#2563eb;">imgs/${mKey}.png</code></div>
-    </div>`,
-    [{txt:'Fechar',cls:'btn-primary',fn:'fecharModal()'}]);
-}
 
 // ── CARRINHO ──────────────────────────────────────────
 function renderCarrinho(){
@@ -2080,19 +2049,12 @@ function renderCarrinho(){
     return;
   }
   const gKey=getGrupoKey(grupoAtual)||'';
-  const hoje=new Date().toISOString().slice(0,10);
-  const limTrans=ST.config?.limiteTransacao??20;
   const itensHtml=entries.map(([mKey,qty])=>{
     const m=ST.materiais[mKey]; if(!m) return '';
     const info=MAT_INFO[mKey]||{}; const emoji=m.emoji||info.emoji||'📦'; const bg=m.bg||info.bg||'#f8fafc';
     const preco=getPrecoAtual(m.nome);
     const subtotal=Math.round(qty*preco*100)/100;
-    const limDiario=Math.max(1,Math.floor((ESTOQUE_INICIAL[mKey]||100)*0.20));
-    const limData=ST.limiteDiario?.[gKey]?.[mKey]||{qty:0,data:''};
-    const usadoHoje=limData.data===hoje?limData.qty:0;
-    const restanteDia=Math.max(0,limDiario-usadoHoje);
     const estoqueCor=m.estoque<5?'#dc2626':m.estoque<15?'#d97706':'#94a3b8';
-    const diaCor=restanteDia<=0?'#dc2626':restanteDia<=3?'#d97706':'#94a3b8';
     return `<div class="cart-item">
       <div class="cart-item-img" style="background:${bg};">${prodImgHtml(m.nome,emoji,bg,undefined,mKey)}</div>
       <div style="flex:1;min-width:0;">
@@ -2100,7 +2062,6 @@ function renderCarrinho(){
         <div style="font-size:12px;color:#64748b;">${fmt(preco)}/un</div>
         <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
           <span style="font-size:10px;color:${estoqueCor};font-weight:600;">${m.estoque<5?'⚠️ ':''} Estoque: ${m.estoque}</span>
-          <span style="font-size:10px;color:${diaCor};font-weight:600;">${restanteDia<=0?'🚫':''} Hoje: ${usadoHoje}/${limDiario} (${restanteDia} restam)</span>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
@@ -2141,20 +2102,13 @@ async function checkoutFromCart(){
   if(simulacaoBloqueada()) return;
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const gKey=getGrupoKey(grupoAtual); if(!gKey) return;
-  const limTrans=ST.config?.limiteTransacao??20;
-  const hoje=new Date().toISOString().slice(0,10);
   const itensSel={}; let total=0, nItens=0;
   for(const [mKey,qty] of Object.entries(cartState)){
     if(qty<=0) continue;
     const m=ST.materiais[mKey]; if(!m) continue;
     if(qty>m.estoque){alert(`Estoque insuficiente de ${m.nome}: apenas ${m.estoque} disponíveis.`);return;}
-    if(qty>limTrans){alert(`Máximo de ${limTrans} unidades de ${m.nome} por compra.`);return;}
-    const limDiario=Math.max(1,Math.floor((ESTOQUE_INICIAL[mKey]||100)*0.20));
-    const limData=ST.limiteDiario?.[gKey]?.[mKey]||{qty:0,data:''};
-    const usadoHoje=limData.data===hoje?limData.qty:0;
-    if(usadoHoje+qty>limDiario){alert(`Limite diário de ${m.nome} atingido (${limDiario} un.).\nJá comprou ${usadoHoje} hoje.`);return;}
     const preco=getPrecoAtual(m.nome);
-    itensSel[nItens]={nome:m.nome,qty,preco,mKey,usadoHoje}; total+=qty*preco; nItens++;
+    itensSel[nItens]={nome:m.nome,qty,preco,mKey}; total+=qty*preco; nItens++;
   }
   if(nItens===0){alert('Carrinho vazio.');return;}
   total=Math.round(total*100)/100;
@@ -2173,7 +2127,6 @@ async function checkoutFromCart(){
     const m=ST.materiais[it.mKey]; if(!m) continue;
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
-    updates[`limiteDiario/${gKey}/${it.mKey}`]={qty:(it.usadoHoje||0)+it.qty,data:hoje};
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
     const estoqueInicial=ESTOQUE_INICIAL[it.mKey]||100;
     if(novoEstoque>0&&novoEstoque<estoqueInicial*0.10&&(!m.acao?.fimTs||m.acao.fimTs<Date.now())){
@@ -2195,22 +2148,14 @@ async function finalizarCompra(){
   if(simulacaoBloqueada()) return;
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const gKey=getGrupoKey(grupoAtual); if(!gKey) return;
-  const limTrans=ST.config?.limiteTransacao??20;
-  const hoje=new Date().toISOString().slice(0,10);
   const itensSel={};
   let total=0, nItens=0;
   for(const [mKey,m] of Object.entries(ST.materiais)){
     const el=document.getElementById('qty-'+mKey); if(!el) continue;
     const qty=parseInt(el.value)||0; if(qty<=0) continue;
     if(qty>m.estoque){alert(`Estoque insuficiente de ${m.nome}: apenas ${m.estoque} disponíveis.`);return;}
-    if(qty>limTrans){alert(`Máximo de ${limTrans} unidades de ${m.nome} por compra.`);return;}
-    // check daily limit = 20% of total stock
-    const limDiario=Math.max(1,Math.floor((ESTOQUE_INICIAL[mKey]||100)*0.20));
-    const limData=ST.limiteDiario?.[gKey]?.[mKey]||{qty:0,data:''};
-    const usadoHoje=limData.data===hoje?limData.qty:0;
-    if(usadoHoje+qty>limDiario){alert(`Limite diário de ${m.nome} atingido (${limDiario} un. = 20% do estoque total).\nJá comprou ${usadoHoje} hoje, restam ${limDiario-usadoHoje}.`);return;}
     const preco=getPrecoAtual(m.nome);
-    itensSel[nItens]={nome:m.nome,qty,preco,mKey,usadoHoje};
+    itensSel[nItens]={nome:m.nome,qty,preco,mKey};
     total+=qty*preco; nItens++;
   }
   if(nItens===0){alert('Selecione ao menos um item (quantidade > 0).');return;}
@@ -2231,9 +2176,6 @@ async function finalizarCompra(){
     const m=ST.materiais[it.mKey]; if(!m) continue;
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
-    // update daily limit
-    updates[`limiteDiario/${gKey}/${it.mKey}`]={qty:(it.usadoHoje||0)+it.qty,data:hoje};
-    // clear raro flag if stock reaches 0
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
     const estoqueInicial=ESTOQUE_INICIAL[it.mKey]||100;
     if(novoEstoque>0 && novoEstoque<estoqueInicial*0.10 && (!m.acao?.fimTs||m.acao.fimTs<Date.now())){
@@ -2772,17 +2714,15 @@ function renderRankings(containerId){
   const maxS=rS[0]?.[1]?.saldo||1,maxC=Math.max(rC[0]?.[1]?.nCompras,1),maxN=Math.max(rN[0]?.[1]?.nNeg,1);
   const meRef=grupoAtual;
   const renderCol=(ranking,titulo,getValue,getFmt,maxVal)=>{
-    const barColors=['#ca8a04','#64748b','#92400e'];
     const rows=ranking.map(([nome,s],i)=>{
       const val=getValue(s),pct=Math.round((val/maxVal)*100);
       const isMeu=nome===meRef;
-      const barC=i<3?barColors[i]:'#e2e8f0';
-      return `<div style="display:flex;align-items:center;gap:6px;padding:7px 4px;border-bottom:1px solid #f8fafc;${isMeu?'background:#eff6ff;border-radius:8px;margin:0 -4px;':''}" >
-        <div style="font-size:15px;min-width:22px;text-align:center;">${posEmoji(i)}</div>
+      return `<div style="display:flex;align-items:center;gap:6px;padding:7px 4px;border-bottom:1px solid #f8fafc;${isMeu?'background:#eff6ff;border-radius:8px;margin:0 -4px;':''}">
+        <div style="font-size:12px;color:#94a3b8;min-width:22px;text-align:center;font-weight:600;">${i+1}.</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:12px;font-weight:700;color:${isMeu?'#2563eb':'#0f172a'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nome}${isMeu?' ◀':''}</div>
           <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;">${s.turma}</div>
-          <div style="height:3px;border-radius:2px;background:#f1f5f9;"><div style="height:100%;width:${pct}%;border-radius:2px;background:${barC};"></div></div>
+          <div style="height:3px;border-radius:2px;background:#f1f5f9;"><div style="height:100%;width:${pct}%;border-radius:2px;background:#cbd5e1;"></div></div>
         </div>
         <div style="font-size:11px;font-weight:700;color:${isMeu?'#2563eb':'#64748b'};min-width:38px;text-align:right;">${getFmt(s)}</div>
       </div>`;
@@ -2792,25 +2732,8 @@ function renderRankings(containerId){
       ${rows}
     </div>`;
   };
-  const podio=(()=>{
-    if(rS.length<1) return '';
-    const medal=['🥇','🥈','🥉'], barH=[70,48,36], barBg=['#fde68a','#e2e8f0','#fed7aa'], barTxt=['#854d0e','#475569','#9a3412'], ordem=[1,0,2];
-    const cols=ordem.filter(i=>rS[i]).map(i=>{
-      const nome=rS[i][0], meu=nome===grupoAtual;
-      return `<div style="text-align:center;width:31%;">
-        <div style="font-size:${i===0?'26px':'18px'};">${medal[i]}</div>
-        <div style="font-size:${i===0?'13px':'12px'};font-weight:700;color:${meu?'#2563eb':'#0f172a'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nome}${meu?' ◀':''}</div>
-        <div style="background:${barBg[i]};border-radius:6px 6px 0 0;height:${barH[i]}px;display:flex;align-items:flex-start;justify-content:center;padding-top:4px;font-size:${i===0?'13px':'11px'};font-weight:700;color:${barTxt[i]};">${i+1}º</div>
-      </div>`;
-    }).join('');
-    return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px 12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);">
-      <div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:12px;">🏆 Pódio — Saldo</div>
-      <div style="display:flex;align-items:flex-end;justify-content:center;gap:6px;">${cols}</div>
-    </div>`;
-  })();
   document.getElementById(containerId).innerHTML=`
     <div style="padding-top:.75rem;">
-      ${podio}
       <div class="rank-cols">
         ${renderCol(rS,'Saldo',s=>s.saldo,s=>{const v=s.saldo/1000;return v>=1?v.toFixed(0)+'k':'<1k';},maxS)}
         ${renderCol(rC,'Compras',s=>s.nCompras,s=>s.nCompras+'×',maxC)}
