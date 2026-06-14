@@ -1777,14 +1777,17 @@ function renderDash(){
   }).join('');
 
 
-  const pausadoBanner=ST.config?.pausado?`<div style="background:#f97316;color:#fff;border-radius:10px;padding:10px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;text-align:center;">⏸ Simulação pausada — aguarde o professor</div>`:'';
   const timerSecs=ST.config?.timerFim?Math.max(0,Math.round((ST.config.timerFim-Date.now())/1000)):0;
   const timerAtivo=!!(ST.config?.timerFim&&ST.config.timerFim>Date.now());
-  const timerBanner=timerAtivo
-    ?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#2563eb;text-align:center;">⏱ Tempo restante: <span id="dash-timer-val">${Math.floor(timerSecs/60)}:${String(timerSecs%60).padStart(2,'0')}</span></div>`
-    :(ST.config?.timerFim&&ST.config.timerFim<Date.now()&&ST.config.timerFim>0
-      ?`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#dc2626;text-align:center;">⏱ Tempo encerrado!</div>`
-      :'');
+  const tempoEncerrado=ST.config?.timerFim&&ST.config.timerFim<Date.now()&&ST.config.timerFim>0;
+  let pausadoBanner='', timerBanner='';
+  if(ST.config?.pausado){
+    pausadoBanner=`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#1e40af;text-align:center;">⏸ Simulação pausada — aguarde o professor</div>`;
+  }else if(timerAtivo){
+    timerBanner=`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#2563eb;text-align:center;">⏱ Tempo restante: <span id="dash-timer-val">${Math.floor(timerSecs/60)}:${String(timerSecs%60).padStart(2,'0')}</span></div>`;
+  }else if(tempoEncerrado){
+    timerBanner=`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#dc2626;text-align:center;">⏱ Tempo encerrado!</div>`;
+  }
   document.getElementById('tab-dashboard').innerHTML=`
     <div style="padding-top:.625rem;">
     ${pausadoBanner}
@@ -2794,11 +2797,30 @@ function renderRankings(containerId){
       ${rows}
     </div>`;
   };
+  const podio=(()=>{
+    if(rS.length<1) return '';
+    const medal=['🥇','🥈','🥉'], barH=[70,48,36], barBg=['#fde68a','#e2e8f0','#fed7aa'], barTxt=['#854d0e','#475569','#9a3412'], ordem=[1,0,2];
+    const cols=ordem.filter(i=>rS[i]).map(i=>{
+      const nome=rS[i][0], meu=nome===grupoAtual;
+      return `<div style="text-align:center;width:31%;">
+        <div style="font-size:${i===0?'26px':'18px'};">${medal[i]}</div>
+        <div style="font-size:${i===0?'13px':'12px'};font-weight:700;color:${meu?'#2563eb':'#0f172a'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nome}${meu?' ◀':''}</div>
+        <div style="background:${barBg[i]};border-radius:6px 6px 0 0;height:${barH[i]}px;display:flex;align-items:flex-start;justify-content:center;padding-top:4px;font-size:${i===0?'13px':'11px'};font-weight:700;color:${barTxt[i]};">${i+1}º</div>
+      </div>`;
+    }).join('');
+    return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px 12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);">
+      <div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:12px;">🏆 Pódio — Saldo</div>
+      <div style="display:flex;align-items:flex-end;justify-content:center;gap:6px;">${cols}</div>
+    </div>`;
+  })();
   document.getElementById(containerId).innerHTML=`
-    <div class="rank-cols" style="padding-top:.75rem;">
-      ${renderCol(rS,'Saldo',s=>s.saldo,s=>{const v=s.saldo/1000;return v>=1?v.toFixed(0)+'k':'<1k';},maxS)}
-      ${renderCol(rC,'Compras',s=>s.nCompras,s=>s.nCompras+'×',maxC)}
-      ${renderCol(rN,'Negoc.',s=>s.nNeg,s=>s.nNeg+'×',maxN)}
+    <div style="padding-top:.75rem;">
+      ${podio}
+      <div class="rank-cols">
+        ${renderCol(rS,'Saldo',s=>s.saldo,s=>{const v=s.saldo/1000;return v>=1?v.toFixed(0)+'k':'<1k';},maxS)}
+        ${renderCol(rC,'Compras',s=>s.nCompras,s=>s.nCompras+'×',maxC)}
+        ${renderCol(rN,'Negoc.',s=>s.nNeg,s=>s.nNeg+'×',maxN)}
+      </div>
     </div>`;
 }
 
