@@ -1302,6 +1302,26 @@ async function limparMercadoEFeed(){
   console.log(`limparMercadoEFeed: ${n} ação(ões) de mercado removida(s) + feed apagado.`);
 }
 window.limparMercadoEFeed=limparMercadoEFeed;
+async function limparGruposOrfaos(){
+  const snap=await db.ref('turmas').once('value');
+  const turmasSnap=snap.val()||{};
+  const nomesValidos=new Set(Object.values(ST.grupos).map(g=>g.nome));
+  const updates={};
+  let nOrfaos=0;
+  Object.entries(turmasSnap).forEach(([key,t])=>{
+    const arr=Array.isArray(t.grupos)?t.grupos:Object.values(t.grupos||{});
+    const orfaos=arr.filter(nome=>!nomesValidos.has(nome));
+    if(orfaos.length){
+      updates[`turmas/${key}/grupos`]=arr.filter(nome=>nomesValidos.has(nome));
+      nOrfaos+=orfaos.length;
+      console.log(`  turma ${t.nome||key}: removendo órfão(s) [${orfaos.join(', ')}]`);
+    }
+  });
+  if(!nOrfaos){console.log('Nenhum grupo órfão encontrado.');return;}
+  await db.ref().update(updates);
+  console.log(`limparGruposOrfaos: ${nOrfaos} órfão(s) removido(s).`);
+}
+window.limparGruposOrfaos=limparGruposOrfaos;
 function rankingSaldo(st)  { return Object.entries(st).sort((a,b)=>b[1].saldo-a[1].saldo); }
 function rankingCompras(st){ return Object.entries(st).sort((a,b)=>b[1].nCompras-a[1].nCompras||b[1].totalGasto-a[1].totalGasto); }
 function rankingNeg(st)    { return Object.entries(st).sort((a,b)=>b[1].nNeg-a[1].nNeg||b[1].totalNeg-a[1].totalNeg); }
@@ -1390,15 +1410,11 @@ function renderGruposLogin() {
     pv.turmas.forEach(t=>{
       (t.grupos||[]).forEach(gNome=>{
         const g=Object.values(ST.grupos).find(x=>x.nome===gNome);
-        const saldoTxt=g?fmt(g.saldo):'—';
         const pct=g?g.saldo/(g.saldoInicial??g.saldo??SI()):1;
         const dot=pct>.5?'#16a34a':pct>.25?'#d97706':'#dc2626';
-        h+=`<button onclick="selGrupo('${gNome}')" style="width:100%;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;cursor:pointer;font-size:13px;font-weight:600;color:#0f172a;text-align:left;display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
-          <div style="display:flex;align-items:center;gap:9px;">
-            <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
-            ${gNome}
-          </div>
-          <span style="font-size:11px;color:#94a3b8;">${saldoTxt}</span>
+        h+=`<button onclick="selGrupo('${gNome}')" style="width:100%;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;cursor:pointer;font-size:13px;font-weight:600;color:#0f172a;text-align:left;display:flex;align-items:center;gap:9px;margin-bottom:5px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
+          ${gNome}
         </button>`;
       });
     });
@@ -4565,9 +4581,18 @@ function confirmarExcluirGrupo(gKey){
     [{txt:'Excluir',cls:'btn-danger',fn:`excluirGrupoFB('${gKey}')`}]);
 }
 function excluirGrupoFB(gKey){
-  db.ref('grupos/'+gKey).remove().then(()=>{
-    showToast('🗑 Grupo removido.'); fecharModal();
-  }).catch(e=>showToast('Erro: '+e.message));
+  const g=ST.grupos[gKey];
+  const updates={[`grupos/${gKey}`]:null};
+  if(g?.turma&&g?.nome){
+    const turmaKey=getTurmaKey(g.turma);
+    if(turmaKey&&turmas[turmaKey]){
+      const arr=Array.isArray(turmas[turmaKey].grupos)?turmas[turmaKey].grupos:Object.values(turmas[turmaKey].grupos||{});
+      updates[`turmas/${turmaKey}/grupos`]=arr.filter(n=>n!==g.nome);
+    }
+  }
+  db.ref().update(updates)
+    .then(()=>{showToast('🗑 Grupo removido.');fecharModal();})
+    .catch(e=>showToast('Erro: '+e.message));
 }
 
 function renderRelatoriosProf(){
