@@ -754,7 +754,6 @@ body{background:var(--c-surface);}
     <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;color:#f1f5f9;">🏗️ Painel TV <span style="font-size:18px;font-weight:400;color:#475569;margin-left:6px;">ao vivo</span></div>
     <div style="display:flex;gap:16px;align-items:center;">
       <div style="font-size:28px;font-weight:700;color:#64748b;font-variant-numeric:tabular-nums;letter-spacing:.02em;" id="tv-clock"></div>
-      <div id="tv-timer" style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em;"></div>
       <button id="tv-som-btn" class="btn-sm" onclick="ativarSomTV(this)" style="border-color:#1e293b;color:#475569;font-size:13px;" title="Ativar alertas sonoros">🔇 Som</button>
       <button class="btn-sm" onclick="logout()" style="border-color:#1e293b;color:#475569;font-size:13px;">Sair</button>
     </div>
@@ -950,7 +949,7 @@ let professores = {}, turmas = {};
 let grupoAtual=null, profAtual=null, tvAtivo=false;
 let feedFiltro='todos', relGrupoAtual=null;
 let pinDigitado='', grupoSelecionado='';
-let tvIv=null, tvClockIv=null, dashTimerIv=null, expiryIv=null, abaAlunoAtual='dashboard', abaProfAtual='painel';
+let tvIv=null, tvClockIv=null, expiryIv=null, abaAlunoAtual='dashboard', abaProfAtual='painel';
 
 // ── HELPERS ──────────────────────────────────────────
 const SI = () => ST.config?.saldoInicial ?? 60000;
@@ -1055,8 +1054,8 @@ function renderNF(compra, grupoNome) {
       <span>TOTAL</span><span>${fmt(compra.total)}</span>
     </div>
     <div style="text-align:center;padding-top:10px;border-top:1px dashed #d1d5db;">
-      <span style="display:inline-block;padding:4px 14px;border-radius:20px;font-weight:800;letter-spacing:.06em;font-size:10px;${compra.entregue?'background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;':'background:#fef2f2;color:#dc2626;border:1px solid #fecaca;'}">
-        ${compra.entregue?'✓ ENTREGUE':'⏳ AGUARDANDO ENTREGA'}
+      <span style="display:inline-block;padding:4px 14px;border-radius:20px;font-weight:800;letter-spacing:.06em;font-size:10px;${compra.cancelada?'background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;':compra.entregue?'background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;':'background:#fef2f2;color:#dc2626;border:1px solid #fecaca;'}">
+        ${compra.cancelada?'❌ COMPRA CANCELADA':compra.entregue?'✓ ENTREGUE':'⏳ AGUARDANDO ENTREGA'}
       </span>
     </div>
   </div>`;
@@ -1621,7 +1620,7 @@ function entrarProf(){
 }
 function entrarTV(){ tvAtivo=true; mostrarScreen('screen-tv'); renderTV(); if(tvIv)clearInterval(tvIv); tvIv=setInterval(renderTV,5000); if(tvClockIv)clearInterval(tvClockIv); tvClockIv=setInterval(()=>{ const e=document.getElementById('tv-clock'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },1000); }
 function entrarAluno(){ document.getElementById('grupo-badge').textContent=grupoAtual; atualizarSaldo(); mostrarScreen('screen-aluno'); tabA('dashboard'); }
-function logout(){ grupoAtual=null; profAtual=null; tvAtivo=false; pinDigitado=''; grupoSelecionado=''; _STORE.removeItem(_ACESSO_KEY); _autoLoginTentado=false; if(tvIv){clearInterval(tvIv);tvIv=null;} if(tvClockIv){clearInterval(tvClockIv);tvClockIv=null;} if(dashTimerIv){clearInterval(dashTimerIv);dashTimerIv=null;} voltarLogin(); mostrarScreen('screen-landing'); atualizarLandingStats(); }
+function logout(){ grupoAtual=null; profAtual=null; tvAtivo=false; pinDigitado=''; grupoSelecionado=''; _STORE.removeItem(_ACESSO_KEY); _autoLoginTentado=false; if(tvIv){clearInterval(tvIv);tvIv=null;} if(tvClockIv){clearInterval(tvClockIv);tvClockIv=null;} voltarLogin(); mostrarScreen('screen-landing'); atualizarLandingStats(); }
 function mostrarScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function sh(id,v){ const e=document.getElementById(id); if(e) e.style.display=v; }
 
@@ -1728,7 +1727,7 @@ function renderDash(){
       <div style="height:100%;width:${100-pct}%;border-radius:4px;background:${barColor};transition:width .4s;"></div>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:6px;">
-      <div style="font-size:11px;opacity:.6;">${pct}% utilizado · ${Object.values(g.compras||{}).length} compra(s)</div>
+      <div style="font-size:11px;opacity:.6;">${pct}% utilizado · ${Object.values(g.compras||{}).filter(c=>!c.cancelada).length} compra(s)</div>
       <button onclick="tabA('loja')" style="font-size:11px;font-weight:700;padding:3px 10px;background:var(--c-orange);border:none;border-radius:6px;color:#fff;cursor:pointer;">Ir à Loja →</button>
     </div>
   </div>`;
@@ -1782,21 +1781,13 @@ function renderDash(){
   }).join('');
 
 
-  const timerSecs=ST.config?.timerFim?Math.max(0,Math.round((ST.config.timerFim-Date.now())/1000)):0;
-  const timerAtivo=!!(ST.config?.timerFim&&ST.config.timerFim>Date.now());
-  const tempoEncerrado=ST.config?.timerFim&&ST.config.timerFim<Date.now()&&ST.config.timerFim>0;
-  let pausadoBanner='', timerBanner='';
+  let pausadoBanner='';
   if(ST.config?.pausado){
     pausadoBanner=`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#1e40af;text-align:center;">⏸ Simulação pausada — aguarde o professor</div>`;
-  }else if(timerAtivo){
-    timerBanner=`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#2563eb;text-align:center;">⏱ Tempo restante: <span id="dash-timer-val">${Math.floor(timerSecs/60)}:${String(timerSecs%60).padStart(2,'0')}</span></div>`;
-  }else if(tempoEncerrado){
-    timerBanner=`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#dc2626;text-align:center;">⏱ Tempo encerrado!</div>`;
   }
   document.getElementById('tab-dashboard').innerHTML=`
     <div style="padding-top:.625rem;">
     ${pausadoBanner}
-    ${timerBanner}
     ${rarosDash}
     ${heroHtml}
     ${rankHtml}
@@ -1809,16 +1800,6 @@ function renderDash(){
       ${feedHtml||'<div style="font-size:13px;color:#94a3b8;padding:6px 0;">Nenhuma atividade ainda.</div>'}
     </div>
     </div>`;
-  if(dashTimerIv){clearInterval(dashTimerIv);dashTimerIv=null;}
-  if(timerAtivo){
-    dashTimerIv=setInterval(()=>{
-      const el=document.getElementById('dash-timer-val'); if(!el){clearInterval(dashTimerIv);dashTimerIv=null;return;}
-      const tf=ST.config?.timerFim||0;
-      const s=Math.max(0,Math.round((tf-Date.now())/1000));
-      if(s<=0){el.closest('div').outerHTML=`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#dc2626;text-align:center;">⏱ Tempo encerrado!</div>`;clearInterval(dashTimerIv);dashTimerIv=null;return;}
-      el.textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
-    },1000);
-  }
 }
 
 // ── LOJA ──────────────────────────────────────────────
@@ -1974,7 +1955,7 @@ ${txt}</div>`;
           }).filter(Boolean).join(' ');
           const semEst=Object.entries(kit.itens||{}).some(([mk,q])=>(ST.materiais[mk]?.estoque||0)<q);
           const semSaldo=saldo<(kit.preco||0);
-          const bloq=semEst||semSaldo||ST.config?.pausado||ST.config?.timerFim>0&&ST.config.timerFim<Date.now();
+          const bloq=semEst||semSaldo||ST.config?.pausado;
           return `<div style="background:#fff;border:2px solid ${semEst?'#fca5a5':'#e0e7ff'};border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;">
             <div style="display:flex;align-items:center;gap:10px;">
               <div style="font-size:36px;background:#f1f5f9;border-radius:10px;padding:8px 12px;">${kit.emoji||'🎁'}</div>
@@ -2009,7 +1990,6 @@ async function comprarKit(kKey){
   const gKey=Object.entries(ST.grupos).find(([,gr])=>gr.nome===ST.grupoAtual)?.[0];
   if(!gKey) return;
   if(ST.config?.pausado){showToast('⚠️ Simulação pausada.');return;}
-  if(ST.config?.timerFim>0&&ST.config.timerFim<Date.now()){showToast('⚠️ Tempo encerrado.');return;}
   // Validar estoque
   for(const [mk,q] of Object.entries(kit.itens||{})){
     const m=ST.materiais[mk];
@@ -2206,7 +2186,6 @@ async function checkoutFromCart(){
 
 async function finalizarCompra(){
   if(simulacaoBloqueada()) return;
-  if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const gKey=getGrupoKey(grupoAtual); if(!gKey) return;
   const limTrans=ST.config?.limiteTransacao??20;
@@ -2379,7 +2358,6 @@ function atualizarLimiteVenda(){
 }
 async function criarVenda(){
   if(simulacaoBloqueada()) return;
-  if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const nome=document.getElementById('venda-mat')?.value;
   const qty=parseInt(document.getElementById('venda-qty')?.value)||0;
@@ -2403,7 +2381,6 @@ async function cancelarVenda(key){
 }
 async function aceitarVenda(key){
   if(simulacaoBloqueada()) return;
-  if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const p=ST.propostas[key]; if(!p||p.status!=='aberta'){alert('Oferta não disponível.');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   if(p.vendedor===grupoAtual){alert('Você não pode comprar sua própria oferta.');return;}
@@ -2868,7 +2845,7 @@ function renderRelatorioAluno(){
   const rS=rankingSaldo(stats),rC=rankingCompras(stats),rN=rankingNeg(stats);
   const posS=rS.findIndex(([n])=>n===grupoAtual)+1,posC=rC.findIndex(([n])=>n===grupoAtual)+1,posN=rN.findIndex(([n])=>n===grupoAtual)+1;
   const _si2=g.saldoInicial??g.saldo??SI(); const gasto=_si2-g.saldo,pct=Math.round((gasto/_si2)*100);
-  const compras=g.compras?Object.values(g.compras):[];
+  const compras=g.compras?Object.values(g.compras).filter(c=>!c.cancelada):[];
   const negGrupo=(ST.transacoes||[]).filter(t=>t.comprador===grupoAtual||t.vendedor===grupoAtual);
   const totalVendido=(ST.transacoes||[]).filter(t=>t.vendedor===grupoAtual).reduce((a,t)=>a+t.total,0);
   const totalCompradoEG=(ST.transacoes||[]).filter(t=>t.comprador===grupoAtual).reduce((a,t)=>a+t.total,0);
@@ -3036,9 +3013,10 @@ function renderPainelProf(){
       todasCompras.push({...c,grupoNome:g.nome});
     });
   });
-  todasCompras.sort((a,b)=>(b.ts||0)-(a.ts||0));
-  // Pendentes primeiro, depois por data
+  // Pendentes → entregues → canceladas, depois por data
   todasCompras.sort((a,b)=>{
+    if(a.cancelada&&!b.cancelada) return 1;
+    if(!a.cancelada&&b.cancelada) return -1;
     if(!a.entregue&&b.entregue) return -1;
     if(a.entregue&&!b.entregue) return 1;
     return (b.ts||0)-(a.ts||0);
@@ -3053,10 +3031,11 @@ function renderPainelProf(){
       const viaTag=isMerc
         ?`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#faf5ff;color:#7c3aed;font-weight:700;border:1px solid #ddd6fe;">Mercado</span>`
         :`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#eff6ff;color:#2563eb;font-weight:700;border:1px solid #bfdbfe;">Loja</span>`;
-      const pendente=!c.entregue;
-      const pendTag=pendente
-        ?`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#dc2626;font-weight:700;border:1px solid #fecaca;">⏳ Pendente</span>`
-        :`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#f0fdf4;color:#16a34a;font-weight:700;border:1px solid #bbf7d0;">✓ Entregue</span>`;
+      const pendTag=c.cancelada
+        ?`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#f3f4f6;color:#6b7280;font-weight:700;border:1px solid #d1d5db;">❌ Cancelada</span>`
+        :!c.entregue
+          ?`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#dc2626;font-weight:700;border:1px solid #fecaca;">⏳ Pendente</span>`
+          :`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#f0fdf4;color:#16a34a;font-weight:700;border:1px solid #bbf7d0;">✓ Entregue</span>`;
       return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 6px;border-bottom:1px solid #f1f5f9;border-radius:5px;${isTurma?'background:#eff6ff;':''}">
         <div style="min-width:0;">
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
@@ -3076,7 +3055,7 @@ function renderPainelProf(){
 
   // ── Notas pendentes por grupo ──
   const pendGrupos=todosGruposKeys.map(([,g])=>{
-    const pend=Object.values(g.compras||{}).filter(c=>!c.entregue).length;
+    const pend=Object.values(g.compras||{}).filter(c=>!c.entregue&&!c.cancelada).length;
     return pend>0?`<span style="font-size:11px;"><strong>${g.nome}</strong>: ${pend}</span>`:'';
   }).filter(Boolean);
   const pendentesDetalhe=pendGrupos.length?`<div style="font-size:11px;color:#64748b;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;">${pendGrupos.join('')}</div>`:'';
@@ -3090,8 +3069,8 @@ function renderPainelProf(){
       if(!entry) return;
       const [gKey,g]=entry;
       const _si3=g.saldoInicial??g.saldo??SI(); const pct=Math.round(((_si3-g.saldo)/_si3)*100);
-      const pend=Object.values(g.compras||{}).filter(c=>!c.entregue).length;
-      const temCompraGrande=Object.values(g.compras||{}).some(c=>c.total>(_si3)*0.3);
+      const pend=Object.values(g.compras||{}).filter(c=>!c.entregue&&!c.cancelada).length;
+      const temCompraGrande=Object.values(g.compras||{}).filter(c=>!c.cancelada).some(c=>c.total>(_si3)*0.3);
       const vendeu=(ST.transacoes||[]).some(t=>t.vendedor===g.nome);
       const comprou=(ST.transacoes||[]).some(t=>t.comprador===g.nome);
       const saldoCor=pct>=90?'#dc2626':pct>=50?'#d97706':'#16a34a';
@@ -3106,7 +3085,7 @@ function renderPainelProf(){
               ${vendeu?'<span style="font-size:9px;padding:1px 5px;background:#f0fdf4;color:#16a34a;border-radius:4px;font-weight:700;">💰</span>':''}
               ${comprou?'<span style="font-size:9px;padding:1px 5px;background:#faf5ff;color:#7c3aed;border-radius:4px;font-weight:700;">🛒</span>':''}
             </div>
-            <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${Object.values(g.compras||{}).length} compra(s)${pend>0?' · <span style="color:#dc2626;font-weight:600;">'+pend+' NF(s) pendente(s)</span>':''}</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${Object.values(g.compras||{}).filter(c=>!c.cancelada).length} compra(s)${pend>0?' · <span style="color:#dc2626;font-weight:600;">'+pend+' NF(s) pendente(s)</span>':''}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:8px;">
             <div style="font-size:13px;font-weight:700;color:${saldoCor};">${fmt(g.saldo)}</div>
@@ -3194,23 +3173,7 @@ function renderAcoesProf(){
   </div>`;
   const filaCheia=nFila>=MAX_FILA_AGUARD;
   const btnLabel='Adicionar à fila';
-  const timerFim=ST.config?.timerFim||0;
-  const timerAtivo=timerFim>Date.now();
-  const tSecsLeft=timerAtivo?Math.max(0,Math.round((timerFim-Date.now())/1000)):0;
-  const timerDisplay=timerAtivo?`<span style="font-size:18px;font-weight:800;color:#2563eb;">⏱ ${Math.floor(tSecsLeft/60)}:${String(tSecsLeft%60).padStart(2,'0')}</span> restantes`:(timerFim>0?`<span style="color:#dc2626;font-weight:700;">⏱ Encerrado</span>`:'Nenhum timer ativo');
   document.getElementById('tab-acoes').innerHTML=`
-    <div class="card" style="margin-bottom:.75rem;">
-      <div class="section-title">⏱ Timer da Simulação</div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <div style="font-size:13px;color:#64748b;">${timerDisplay}</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
-          <input type="number" id="timer-min" min="1" value="60" style="width:70px;padding:6px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:7px;text-align:center;">
-          <span style="font-size:12px;color:#64748b;">min</span>
-          <button onclick="confirmarIniciarTimer()" class="btn-info" style="font-size:12px;padding:6px 12px;">Iniciar timer</button>
-          <button onclick="confirmarEncerrarTimer()" class="btn-danger" style="font-size:12px;padding:6px 12px;">Encerrar</button>
-        </div>
-      </div>
-    </div>
     <div class="card" style="margin-bottom:.75rem;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
         <div class="section-title" style="margin:0;">Ações ativas (${nAtivas}/${MAX_ACOES_ATIVAS})</div>
@@ -3454,27 +3417,11 @@ async function ajustarSaldoGrupo(){
   document.getElementById('ajuste-valor').value='';
   document.getElementById('ajuste-just').value='';
 }
-async function iniciarTimer(){
-  const min=parseInt(document.getElementById('timer-min')?.value)||60;
-  await db.ref('config').update({timerFim:Date.now()+min*60000,timerDur:min});
-  showToast(`Timer iniciado: ${min} minutos`);
-}
 function confirmarTogglePausa(){
   const pausado=ST.config?.pausado;
   abrirModal(pausado?'Retomar simulação?':'Pausar simulação?',
     `<div style="font-size:13px;color:#0f172a;padding:6px 0;">${pausado?'Todos os grupos poderão voltar a comprar e vender.':'Todos os grupos serão impedidos de comprar e vender até você retomar.'}</div>`,
     [{txt:pausado?'▶ Retomar':'⏸ Pausar',cls:'btn-primary',fn:`db.ref('config/pausado').set(${!pausado});fecharModal();`}]);
-}
-function confirmarIniciarTimer(){
-  const min=parseInt(document.getElementById('timer-min')?.value)||60;
-  abrirModal('Iniciar timer?',
-    `<div style="font-size:13px;color:#0f172a;padding:6px 0;">Iniciar contagem regressiva de <strong>${min} minuto(s)</strong>. Quando encerrar, compras serão bloqueadas automaticamente.</div>`,
-    [{txt:'⏱ Iniciar',cls:'btn-primary',fn:`iniciarTimer();fecharModal();`}]);
-}
-function confirmarEncerrarTimer(){
-  abrirModal('Encerrar timer?',
-    `<div style="font-size:13px;color:#0f172a;padding:6px 0;">Isso encerrará o tempo da simulação imediatamente e bloqueará novas compras.</div>`,
-    [{txt:'Encerrar agora',cls:'btn-danger',fn:`db.ref('config').update({timerFim:Date.now()-1});fecharModal();showToast('Timer encerrado.');`}]);
 }
 function confirmarExcluirItem(mKey){
   const m=ST.materiais[mKey]; if(!m) return;
@@ -4922,13 +4869,6 @@ function renderTV(){
   set('tv-acoes-wrap',acoesHtml);
   set('tv-rank-wrap', rankHtml);
   set('tv-fila-wrap', filaHtml);
-  const tvTimerEl=document.getElementById('tv-timer');
-  if(tvTimerEl){
-    const tf=ST.config?.timerFim||0;
-    if(tf>Date.now()){const ts=Math.max(0,Math.round((tf-Date.now())/1000));tvTimerEl.textContent=`⏱ ${Math.floor(ts/60)}:${String(ts%60).padStart(2,'0')}`;tvTimerEl.style.color='#4ade80';}
-    else if(tf>0){tvTimerEl.textContent='⏱ Encerrado';tvTimerEl.style.color='#f87171';}
-    else{tvTimerEl.textContent='';}
-  }
 }
 
 // ── MODAL ─────────────────────────────────────────────
