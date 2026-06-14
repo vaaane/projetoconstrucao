@@ -809,9 +809,17 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // ── ESTADO LOCAL (mirror do Firebase) ────────────────
-let ST = { grupos:{}, materiais:{}, transacoes:{}, propostas:{}, feed:[], config:{saldoInicial:60000}, filaAcoes:{}, limiteDiario:{}, matInfo:{}, historicoPrecos:{}, kits:{} };
+let ST = { grupos:{}, materiais:{}, transacoes:[], propostas:{}, feed:[], config:{saldoInicial:60000}, filaAcoes:{}, limiteDiario:{}, matInfo:{}, historicoPrecos:{}, kits:{}, chamada:{} };
 let _ultimaAcaoInfo = null;
 let cartState = {}; // {mKey: qty}
+
+// ── LEMBRAR ACESSO ────────────────────────────────────
+// Troque sessionStorage por localStorage para persistir entre sessões do navegador.
+// Mude LEMBRAR_ACESSO para false para desativar o auto-login completamente.
+const LEMBRAR_ACESSO = true;
+const _STORE = sessionStorage; // sessionStorage = por aba; localStorage = entre sessões
+const _ACESSO_KEY = 'mc_acesso';
+let _autoLoginTentado = false;
 
 // ── SOM TV ───────────────────────────────────────────
 let _tvAudioCtx = null;
@@ -1120,6 +1128,7 @@ function setupListeners() {
   });
   db.ref('turmas').on('value', s => { turmas=s.val()||{}; renderGruposLogin(); });
   db.ref('grupos').on('value', s => { ST.grupos=s.val()||{}; scheduleRender(); });
+  db.ref('chamada').on('value', s => { ST.chamada=s.val()||{}; scheduleRender(); });
   let _matKeysAntes=null;
   db.ref('materiais').on('value', s => {
     const novo=s.val()||{};
@@ -1141,8 +1150,7 @@ function setupListeners() {
     scheduleRender();
   });
   db.ref('transacoes').on('value', s => {
-    const raw=s.val()||{};
-    ST.transacoes=Object.values(raw).sort((a,b)=>(a.ts||0)-(b.ts||0));
+    ST.transacoes=Object.values(s.val()||{}).sort((a,b)=>(a.ts||0)-(b.ts||0));
     scheduleRender();
   });
   db.ref('propostas').on('value', s => { ST.propostas=s.val()||{}; scheduleRender(); });
@@ -1160,7 +1168,7 @@ function setupListeners() {
   db.ref('materiais').on('value', s => {
     const novos=s.val()||{};
     Object.entries(novos).forEach(([k,m])=>{
-      if(m.raro && m.estoque>0 && (matEstoqueAnterior[k]?.estoque||0)===0 && matEstoqueAnterior[k]!==undefined){
+      if(isRaroAtivo(m) && (matEstoqueAnterior[k]?.estoque||0)===0 && matEstoqueAnterior[k]!==undefined){
         dispararNotificacaoRaro(m.nome);
       }
     });
@@ -1188,7 +1196,31 @@ let renderPending=false;
 function scheduleRender() {
   if (renderPending) return;
   renderPending=true;
-  requestAnimationFrame(()=>{ renderPending=false; renderCurrentView(); });
+  requestAnimationFrame(()=>{ renderPending=false; tentarAutoLogin(); renderCurrentView(); });
+}
+function tentarAutoLogin(){
+  if(_autoLoginTentado||!LEMBRAR_ACESSO) return;
+  // Aguarda dados mínimos do Firebase antes de tentar
+  const temGrupos=Object.keys(ST.grupos).length>0;
+  const temProfs=Object.keys(professores).length>0;
+  if(!temGrupos&&!temProfs) return;
+  _autoLoginTentado=true;
+  const raw=_STORE.getItem(_ACESSO_KEY);
+  if(!raw) return;
+  try {
+    const salvo=JSON.parse(raw);
+    if(salvo.tipo==='grupo'){
+      const g=Object.values(ST.grupos).find(x=>x.nome===salvo.nome);
+      if(!g){_STORE.removeItem(_ACESSO_KEY); return;}
+      grupoAtual=salvo.nome;
+      entrarAluno();
+    } else if(salvo.tipo==='prof'){
+      if(!professores[salvo.pk]){_STORE.removeItem(_ACESSO_KEY); return;}
+      profAtual=salvo.pk;
+      document.getElementById('prof-badge').textContent=professores[profAtual]?.nome||profAtual;
+      mostrarScreen('screen-prof'); tabP('painel');
+    }
+  } catch(e){ _STORE.removeItem(_ACESSO_KEY); }
 }
 function renderCurrentView() {
   if (grupoAtual) {
@@ -1209,17 +1241,67 @@ function calcStats() {
   const stats={};
   Object.entries(ST.grupos).forEach(([key,g])=>{
     const nome = g.nome||key;
-    const gasto = SI()-g.saldo;
+    const si=g.saldoInicial??g.saldo??SI(); const gasto = si-g.saldo;
     const compras = g.compras ? Object.values(g.compras) : [];
     const nCompras = compras.length;
     const totalGasto = compras.reduce((a,c)=>a+c.total,0);
-    const nNeg = ST.transacoes.filter(t=>t.comprador===nome||t.vendedor===nome).length;
-    const totalNeg = ST.transacoes.filter(t=>t.comprador===nome||t.vendedor===nome).reduce((a,t)=>a+t.total,0);
+    const nNeg = (ST.transacoes||[]).filter(t=>t.comprador===nome||t.vendedor===nome).length;
+    const totalNeg = (ST.transacoes||[]).filter(t=>t.comprador===nome||t.vendedor===nome).reduce((a,t)=>a+t.total,0);
     const itensDiferentes = new Set(compras.flatMap(c=>Object.values(c.itens||{}).map(i=>i.nome))).size;
     stats[nome]={saldo:g.saldo,gasto,nCompras,totalGasto,nNeg,totalNeg,itensDiferentes,turma:g.turma,key,bloqueado:g.bloqueado};
   });
   return stats;
 }
+async function migrarSaldoInicial(){
+  const snap=await db.ref('grupos').once('value');
+  const grupos=snap.val()||{};
+  const updates={};
+  let n=0;
+  Object.entries(grupos).forEach(([key,g])=>{
+    if(g.saldoInicial==null&&g.saldo!=null){
+      updates[`grupos/${key}/saldoInicial`]=g.saldo;
+      n++;
+    }
+  });
+  if(!n){console.log('Nenhum grupo sem saldoInicial encontrado.');return;}
+  await db.ref().update(updates);
+  console.log(`migrarSaldoInicial: ${n} grupo(s) atualizados.`);
+}
+window.migrarSaldoInicial=migrarSaldoInicial;
+async function limparAcoesMercado(){
+  const snap=await db.ref('materiais').once('value');
+  const mats=snap.val()||{};
+  const updates={};
+  let n=0;
+  Object.entries(mats).forEach(([key,m])=>{
+    if(m.acao&&m.acao.tipo!=='raro'){
+      updates[`materiais/${key}/acao`]=null;
+      n++;
+      console.log(`  → limpando ${m.nome} (${m.acao.tipo})`);
+    }
+  });
+  if(!n){console.log('Nenhuma ação de mercado ativa encontrada.');return;}
+  await db.ref().update(updates);
+  console.log(`limparAcoesMercado: ${n} ação(ões) removida(s).`);
+}
+window.limparAcoesMercado=limparAcoesMercado;
+async function limparMercadoEFeed(){
+  const snap=await db.ref('materiais').once('value');
+  const mats=snap.val()||{};
+  const updates={};
+  let n=0;
+  Object.entries(mats).forEach(([key,m])=>{
+    if(m.acao&&m.acao.tipo!=='raro'){
+      updates[`materiais/${key}/acao`]=null;
+      n++;
+      console.log(`  acao limpa: ${m.nome} (${m.acao.tipo})`);
+    }
+  });
+  updates['feed']=null;
+  await db.ref().update(updates);
+  console.log(`limparMercadoEFeed: ${n} ação(ões) de mercado removida(s) + feed apagado.`);
+}
+window.limparMercadoEFeed=limparMercadoEFeed;
 function rankingSaldo(st)  { return Object.entries(st).sort((a,b)=>b[1].saldo-a[1].saldo); }
 function rankingCompras(st){ return Object.entries(st).sort((a,b)=>b[1].nCompras-a[1].nCompras||b[1].totalGasto-a[1].totalGasto); }
 function rankingNeg(st)    { return Object.entries(st).sort((a,b)=>b[1].nNeg-a[1].nNeg||b[1].totalNeg-a[1].totalNeg); }
@@ -1242,6 +1324,8 @@ function canProfDeliver(grupoKey) {
 const ESTOQUE_INICIAL={'Isopor_1cm':30,'EVA_colorido':100,'Palito_de_picole':500,'Palito_de_churrasco':300,'Tinta_guache_comum':60,'Areia_colorida':200,'Feltro':150,'Lixa_fina':100,'Serragem':80,'Papel_kraft':100,'Papel_aluminio':80,'Glitter_grosso':60,'Pedrisco':150,'Conjunto_eletrico':5,'Esponja_verde':50,'Tinta_guache_metalica':10};
 
 async function verificarAcaoAutomatica() {
+  if(ST.config?.pausado===true) return;
+  if(!Object.values(ST.grupos).some(g=>!g.bloqueado)) return;
   const agora=Date.now();
   // Checar ultima acao auto
   const snapTs=await db.ref('config/ultimaAcaoAuto').get();
@@ -1307,7 +1391,7 @@ function renderGruposLogin() {
       (t.grupos||[]).forEach(gNome=>{
         const g=Object.values(ST.grupos).find(x=>x.nome===gNome);
         const saldoTxt=g?fmt(g.saldo):'—';
-        const pct=g?g.saldo/SI():1;
+        const pct=g?g.saldo/(g.saldoInicial??g.saldo??SI()):1;
         const dot=pct>.5?'#16a34a':pct>.25?'#d97706':'#dc2626';
         h+=`<button onclick="selGrupo('${gNome}')" style="width:100%;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;cursor:pointer;font-size:13px;font-weight:600;color:#0f172a;text-align:left;display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
           <div style="display:flex;align-items:center;gap:9px;">
@@ -1367,7 +1451,7 @@ function atualizarLandingStats(){
   // ── 2 cards hero ──
   const mats=ST.materiais||{};
   // 1º: item raro disponível (se houver)
-  const raros=Object.entries(mats).filter(([,m])=>m.raro&&m.estoque>0);
+  const raros=Object.entries(mats).filter(([,m])=>isRaroAtivo(m));
   // 2º: itens em oferta (desconto)
   const ofertas=Object.entries(mats).filter(([k,m])=>m.acao?.tipo==='oferta'&&m.acao.fimTs>Date.now()&&m.estoque>0);
   // Fallback: qualquer item disponível ordenado por estoque
@@ -1408,7 +1492,7 @@ function atualizarLandingStats(){
     const info=MAT_INFO[mKey]||{}; const emoji=m.emoji||info.emoji||'📦'; const bg=m.bg||info.bg||'#f8fafc';
     const preco=getPrecoAtual?getPrecoAtual(m.nome):m.preco;
     const a=getAcaoLabel?getAcaoLabel(m.nome):null;
-    const isRaro=m.raro&&m.estoque>0;
+    const isRaro=isRaroAtivo(m);
     const isOferta=a&&m.acao?.tipo==='oferta';
     const isAlta=a&&m.acao?.tipo==='alta';
     // stagger: first card is higher (no margin), second is lower (margin-top)
@@ -1474,6 +1558,7 @@ function checkProfSenha(){
   if(inp.value===senhaEsperada){
     document.getElementById('prof-senha-erro').style.display='none';
     profAtual=profSelecionadoKey;
+    if(LEMBRAR_ACESSO) _STORE.setItem(_ACESSO_KEY,JSON.stringify({tipo:'prof',pk:profAtual}));
     document.getElementById('prof-badge').textContent=professores[profAtual]?.nome||profAtual;
     mostrarScreen('screen-prof'); tabP('painel');
   } else {
@@ -1501,6 +1586,7 @@ function checkPin(){
   const g = Object.values(ST.grupos).find(x=>x.nome===grupoSelecionado);
   if (g && pin===String(g.pin).trim()) {
     grupoAtual=grupoSelecionado;
+    if(LEMBRAR_ACESSO) _STORE.setItem(_ACESSO_KEY,JSON.stringify({tipo:'grupo',nome:grupoAtual}));
     document.getElementById('pin-erro').style.display='none';
     entrarAluno();
   } else {
@@ -1514,7 +1600,7 @@ function entrarProf(){
 }
 function entrarTV(){ tvAtivo=true; mostrarScreen('screen-tv'); renderTV(); if(tvIv)clearInterval(tvIv); tvIv=setInterval(renderTV,5000); if(tvClockIv)clearInterval(tvClockIv); tvClockIv=setInterval(()=>{ const e=document.getElementById('tv-clock'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },1000); }
 function entrarAluno(){ document.getElementById('grupo-badge').textContent=grupoAtual; atualizarSaldo(); mostrarScreen('screen-aluno'); tabA('dashboard'); }
-function logout(){ grupoAtual=null; profAtual=null; tvAtivo=false; pinDigitado=''; grupoSelecionado=''; if(tvIv){clearInterval(tvIv);tvIv=null;} if(tvClockIv){clearInterval(tvClockIv);tvClockIv=null;} if(dashTimerIv){clearInterval(dashTimerIv);dashTimerIv=null;} voltarLogin(); mostrarScreen('screen-landing'); atualizarLandingStats(); }
+function logout(){ grupoAtual=null; profAtual=null; tvAtivo=false; pinDigitado=''; grupoSelecionado=''; _STORE.removeItem(_ACESSO_KEY); _autoLoginTentado=false; if(tvIv){clearInterval(tvIv);tvIv=null;} if(tvClockIv){clearInterval(tvClockIv);tvClockIv=null;} if(dashTimerIv){clearInterval(dashTimerIv);dashTimerIv=null;} voltarLogin(); mostrarScreen('screen-landing'); atualizarLandingStats(); }
 function mostrarScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function sh(id,v){ const e=document.getElementById(id); if(e) e.style.display=v; }
 
@@ -1572,7 +1658,7 @@ function atualizarSaldo(){
   disp.textContent=fmt(g.saldo);
   if(turmaLbl) turmaLbl.textContent=g.turma||'';
   if(blk) blk.style.display=g.bloqueado?'inline-block':'none';
-  const pct=g.saldo/SI();
+  const pct=g.saldo/(g.saldoInicial??g.saldo??SI());
   disp.style.color=g.saldo<=0?'#dc2626':pct<.25?'#d97706':'#16a34a';
 }
 
@@ -1580,7 +1666,7 @@ function atualizarSaldo(){
 function renderDash(){
   const g=getGrupoAtualData(); if(!g) return;
   const stats=calcStats(), s=stats[grupoAtual]||{};
-  const gasto=SI()-g.saldo, pct=Math.round((gasto/SI())*100);
+  const _si=g.saldoInicial??g.saldo??SI(); const gasto=_si-g.saldo, pct=Math.round((gasto/_si)*100);
   const rS=rankingSaldo(stats),rC=rankingCompras(stats),rN=rankingNeg(stats);
   const posS=rS.findIndex(([n])=>n===grupoAtual)+1, posC=rC.findIndex(([n])=>n===grupoAtual)+1, posN=rN.findIndex(([n])=>n===grupoAtual)+1;
   const barColor=pct<50?'#4ade80':pct<75?'#fbbf24':'#f87171';
@@ -1588,7 +1674,7 @@ function renderDash(){
 
   // ── Item Raro
   const rarosDash=(()=>{
-    const r=Object.entries(ST.materiais).filter(([,m])=>m.raro&&m.estoque>0);
+    const r=Object.entries(ST.materiais).filter(([,m])=>isRaroAtivo(m));
     if(!r.length) return '';
     return r.map(([mKey,m])=>{
       const info=MAT_INFO[mKey]||{}; const emoji=m.emoji||info.emoji||'✨';
@@ -1610,7 +1696,7 @@ function renderDash(){
       <div>
         <div class="dash-hero-label">Orçamento disponível</div>
         <div class="dash-hero-saldo">${fmt(g.saldo)}</div>
-        <div class="dash-hero-sub">de ${fmt(SI())} · ${g.turma}</div>
+        <div class="dash-hero-sub">de ${fmt(g.saldoInicial??g.saldo??SI())} · ${g.turma}</div>
       </div>
       <div style="text-align:right;">
         <div style="font-size:36px;font-weight:900;color:${saldoColor};letter-spacing:-.03em;line-height:1;">${100-pct}%</div>
@@ -1639,7 +1725,7 @@ function renderDash(){
   // ── Itens em destaque (com ação ativa ou raros)
   const emDestaque=Object.entries(ST.materiais).filter(([,m])=>{
     const a=getAcaoLabel(m.nome);
-    return a&&a.tipo!=='indisponivel'||m.raro;
+    return a&&a.tipo!=='indisponivel'||isRaroAtivo(m);
   });
   let destaqueHtml='';
   if(emDestaque.length){
@@ -1733,14 +1819,14 @@ function renderLoja(){
 
   // Categorias disponíveis (dinâmico: base + raros se houver + ofertas se houver)
   const CATS=['Todos','Estrutural','Estético','Área externa'];
-  const temRaros=Object.values(ST.materiais).some(m=>m.raro&&m.estoque>0);
+  const temRaros=Object.values(ST.materiais).some(isRaroAtivo);
   const temOfertas=Object.values(ST.materiais).some(m=>m.acao?.tipo==='oferta'&&m.acao.fimTs>Date.now()&&m.estoque>0);
   if(temOfertas) CATS.splice(1,0,'Ofertas');
   if(temRaros)   CATS.push('Raro');
 
   // Filtrar e ordenar materiais por categoria selecionada
   let matEntries=Object.entries(ST.materiais).filter(([,m])=>!m.oculto);
-  if(lojaCategoria==='Raro')         matEntries=matEntries.filter(([,m])=>m.raro);
+  if(lojaCategoria==='Raro')         matEntries=matEntries.filter(([,m])=>isRaroAtivo(m));
   else if(lojaCategoria==='Ofertas') matEntries=matEntries.filter(([k,m])=>m.acao?.tipo==='oferta'&&m.acao.fimTs>Date.now());
   else if(lojaCategoria!=='Todos'){
     matEntries=matEntries.filter(([k,m])=>{
@@ -1753,7 +1839,7 @@ function renderLoja(){
     const ao=ma.acao?.tipo==='oferta'&&ma.acao.fimTs>Date.now();
     const bo=mb.acao?.tipo==='oferta'&&mb.acao.fimTs>Date.now();
     if(ao&&!bo) return -1; if(!ao&&bo) return 1;
-    if(ma.raro&&!mb.raro) return -1; if(!ma.raro&&mb.raro) return 1;
+    if(isRaroAtivo(ma)&&!isRaroAtivo(mb)) return -1; if(!isRaroAtivo(ma)&&isRaroAtivo(mb)) return 1;
     const aVazio=ma.estoque<=0, bVazio=mb.estoque<=0;
     if(aVazio&&!bVazio) return 1; if(!aVazio&&bVazio) return -1;
     return 0;
@@ -1783,7 +1869,7 @@ function renderLoja(){
 ${txt}</div>`;
     const isNovo=m._novoAte&&m._novoAte>Date.now();
     let cornerBadge='';
-    if(m.raro&&!semEstoque)  cornerBadge=cb('linear-gradient(135deg,#ca8a04,#78350f)','✨ RARO',true);
+    if(isRaroAtivo(m)&&!semEstoque)  cornerBadge=cb('linear-gradient(135deg,#ca8a04,#78350f)','✨ RARO',true);
     else if(isNovo)          cornerBadge=cb('linear-gradient(135deg,#2563eb,#1d4ed8)','🆕 Novo!',false);
     else if(indisponivel)    cornerBadge=cb('#dc2626','🚫 Indisp.',false);
     else if(limiteAtingido)  cornerBadge=cb('#64748b','Limite',false);
@@ -1816,7 +1902,7 @@ ${txt}</div>`;
     const catCor=catCorMap[catLabel]||'#475569';
     const kitTag=kitInfo?`<div style="font-size:10px;color:#475569;font-weight:600;line-height:1.4;margin-bottom:2px;">📦 1 ${kitUnidade} = ${kitInfo}</div>`:'';
     const catTag=catLabel?`<div style="display:inline-block;font-size:9px;font-weight:700;padding:1px 7px;border-radius:10px;background:${catCor}18;color:${catCor};border:1px solid ${catCor}33;margin-bottom:3px;">${catLabel}</div>`:'';
-    return `<div class="prod-card${m.raro&&!semEstoque?' raro':isNovo?' novo':''}${bloqueado?' bloqueado':''}${semEstoque?' bloqueado':''}" style="${semEstoque?'opacity:.6;filter:grayscale(.4);':''}">
+    return `<div class="prod-card${isRaroAtivo(m)&&!semEstoque?' raro':isNovo?' novo':''}${bloqueado?' bloqueado':''}${semEstoque?' bloqueado':''}" style="${semEstoque?'opacity:.6;filter:grayscale(.4);':''}">
       <div class="prod-img-wrap" style="background:${infoBg};">
         ${prodImgHtml(m.nome,infoEmoji,infoBg,undefined,mKey)}
         ${semEstoque?`<div class="prod-corner-badge" style="background:#64748b;">Esgotado</div>`:cornerBadge}
@@ -2391,11 +2477,11 @@ function renderMercado(){
   </div>`;
 
   // Histórico de compras e vendas do grupo no mercado
-  const minhasComprasMerc=ST.transacoes.filter(t=>t.comprador===grupoAtual).map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;">
+  const minhasComprasMerc=(ST.transacoes||[]).filter(t=>t.comprador===grupoAtual).map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;">
     <div><div style="font-size:13px;font-weight:600;color:#0f172a;">🛒 ${t.qty}× ${t.item}</div><div style="font-size:11px;color:#94a3b8;">de ${t.vendedor} · ${t.data||''}</div></div>
     <div style="font-size:13px;font-weight:700;color:#dc2626;">−${fmt(t.total)}</div>
   </div>`).join('');
-  const minhasVendasMerc=ST.transacoes.filter(t=>t.vendedor===grupoAtual).map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;">
+  const minhasVendasMerc=(ST.transacoes||[]).filter(t=>t.vendedor===grupoAtual).map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;">
     <div><div style="font-size:12px;font-weight:600;color:#0f172a;">💰 ${t.qty}× ${t.item}</div><div style="font-size:11px;color:#94a3b8;">para ${t.comprador} · ${t.data||''}</div></div>
     <div style="font-size:12px;font-weight:700;color:#16a34a;">+${fmt(t.total)}</div>
   </div>`).join('');
@@ -2701,6 +2787,10 @@ function renderRankings(containerId){
 }
 
 // ── FEED ──────────────────────────────────────────────
+const isRaroAtivo=m=>m.raro&&m.estoque>0&&m.acao?.tipo==='raro';
+function getRarosAtivos(){
+  return Object.values(ST.materiais).filter(isRaroAtivo);
+}
 function renderFeedCompleto(containerId){
   const filtros=[{id:'todos',label:'Todos'},{id:'compra',label:'Compras'},{id:'negocio',label:'Negociações'},{id:'mercado',label:'Mercado'}];
   const filtroHtml=filtros.map(f=>`<button class="feed-filtro-btn ${feedFiltro===f.id?'active':''}" onclick="setFeedFiltro('${f.id}','${containerId}')">${f.label}</button>`).join('');
@@ -2711,7 +2801,7 @@ function renderFeedCompleto(containerId){
     return `<div class="feed-item"><div class="feed-dot" style="background:${cor};"></div><div style="flex:1;"><div>${f.txt}</div><div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">${label}${f.data?' • '+f.data:''}</div></div></div>`;
   }).join('')||'<div style="font-size:13px;color:var(--color-text-secondary);padding:8px 0;">Nenhum evento.</div>';
   const isProfFeed=containerId==='tab-feed-prof';
-  const rarosFeed=isProfFeed?Object.values(ST.materiais).filter(m=>m.raro&&m.estoque>0):[];
+  const rarosFeed=isProfFeed?getRarosAtivos():[];
   const raroBannerFeed=rarosFeed.length
     ?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:7px 12px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
         <span style="font-size:14px;">✨</span>
@@ -2728,11 +2818,11 @@ function renderRelatorioAluno(){
   const stats=calcStats(),s=stats[grupoAtual]||{};
   const rS=rankingSaldo(stats),rC=rankingCompras(stats),rN=rankingNeg(stats);
   const posS=rS.findIndex(([n])=>n===grupoAtual)+1,posC=rC.findIndex(([n])=>n===grupoAtual)+1,posN=rN.findIndex(([n])=>n===grupoAtual)+1;
-  const gasto=SI()-g.saldo,pct=Math.round((gasto/SI())*100);
+  const _si2=g.saldoInicial??g.saldo??SI(); const gasto=_si2-g.saldo,pct=Math.round((gasto/_si2)*100);
   const compras=g.compras?Object.values(g.compras):[];
-  const negGrupo=ST.transacoes.filter(t=>t.comprador===grupoAtual||t.vendedor===grupoAtual);
-  const totalVendido=ST.transacoes.filter(t=>t.vendedor===grupoAtual).reduce((a,t)=>a+t.total,0);
-  const totalCompradoEG=ST.transacoes.filter(t=>t.comprador===grupoAtual).reduce((a,t)=>a+t.total,0);
+  const negGrupo=(ST.transacoes||[]).filter(t=>t.comprador===grupoAtual||t.vendedor===grupoAtual);
+  const totalVendido=(ST.transacoes||[]).filter(t=>t.vendedor===grupoAtual).reduce((a,t)=>a+t.total,0);
+  const totalCompradoEG=(ST.transacoes||[]).filter(t=>t.comprador===grupoAtual).reduce((a,t)=>a+t.total,0);
   const itensMap={};
   compras.forEach(c=>Object.values(c.itens||{}).forEach(i=>{itensMap[i.nome]=itensMap[i.nome]||{qty:0,total:0};itensMap[i.nome].qty+=i.qty;itensMap[i.nome].total+=i.qty*i.preco;}));
   const itensList=Object.entries(itensMap).sort((a,b)=>b[1].total-a[1].total);
@@ -2773,7 +2863,7 @@ function renderRelatorioAluno(){
         </div>
         <div class="card" style="margin:0;">
           <div class="rel-title">Financeiro</div>
-          <div class="rel-row"><span class="label" style="font-size:12px;">Inicial</span><span style="font-size:12px;">${fmt(SI())}</span></div>
+          <div class="rel-row"><span class="label" style="font-size:12px;">Inicial</span><span style="font-size:12px;">${fmt(_si2)}</span></div>
           <div class="rel-row"><span class="label" style="font-size:12px;">Loja</span><span style="color:#dc2626;font-size:12px;">− ${fmt(gasto)}</span></div>
           ${totalCompradoEG?`<div class="rel-row"><span class="label" style="font-size:12px;">Entre grupos</span><span style="color:#dc2626;font-size:12px;">− ${fmt(totalCompradoEG)}</span></div>`:''}
           ${totalVendido?`<div class="rel-row"><span class="label" style="font-size:12px;">Vendas</span><span style="color:#16a34a;font-size:12px;">+ ${fmt(totalVendido)}</span></div>`:''}
@@ -2817,7 +2907,7 @@ function renderPainelProf(){
   const minhasTurmas=Object.values(turmas).filter(t=>t.prof===profAtual);
   const todosGruposKeys=minhasTurmas.flatMap(t=>(t.grupos||[]).map(gNome=>Object.entries(ST.grupos).find(([,g])=>g.nome===gNome))).filter(Boolean);
   const minhaTurmaSet=new Set(todosGruposKeys.map(([,g])=>g.nome));
-  const totGasto=todosGruposKeys.reduce((a,[,g])=>a+(SI()-g.saldo),0);
+  const totGasto=todosGruposKeys.reduce((a,[,g])=>a+((g.saldoInicial??g.saldo??SI())-g.saldo),0);
   const totComp=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).length,0);
   const totPend=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).filter(c=>!c.entregue).length,0);
 
@@ -2827,7 +2917,7 @@ function renderPainelProf(){
   const tagPend=`<span style="font-size:9px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#dc2626;font-weight:700;border:1px solid #fecaca;">⏳ Pendente</span>`;
 
   todosGruposKeys.forEach(([gKey,g])=>{
-    const pctGasto=Math.round(((SI()-g.saldo)/SI())*100);
+    const _si5=g.saldoInicial??g.saldo??SI(); const pctGasto=Math.round(((_si5-g.saldo)/_si5)*100);
     const comprasArr=Object.values(g.compras||{});
     const linhas=[];
 
@@ -2859,7 +2949,7 @@ function renderPainelProf(){
   });
   alertas.sort((a,b)=>b.prio-a.prio);
 
-  const rarosAtivos=Object.values(ST.materiais).filter(m=>m.raro&&m.estoque>0);
+  const rarosAtivos=getRarosAtivos();
   const rarosPainelHtml=rarosAtivos.length
     ?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:7px 12px;margin-bottom:.75rem;display:flex;align-items:center;gap:8px;">
         <span style="font-size:13px;">✨</span>
@@ -2941,11 +3031,11 @@ function renderPainelProf(){
       const entry=Object.entries(ST.grupos).find(([,g])=>g.nome===gNome);
       if(!entry) return;
       const [gKey,g]=entry;
-      const pct=Math.round(((SI()-g.saldo)/SI())*100);
+      const _si3=g.saldoInicial??g.saldo??SI(); const pct=Math.round(((_si3-g.saldo)/_si3)*100);
       const pend=Object.values(g.compras||{}).filter(c=>!c.entregue).length;
-      const temCompraGrande=Object.values(g.compras||{}).some(c=>c.total>SI()*0.3);
-      const vendeu=ST.transacoes.some(t=>t.vendedor===g.nome);
-      const comprou=ST.transacoes.some(t=>t.comprador===g.nome);
+      const temCompraGrande=Object.values(g.compras||{}).some(c=>c.total>(_si3)*0.3);
+      const vendeu=(ST.transacoes||[]).some(t=>t.vendedor===g.nome);
+      const comprou=(ST.transacoes||[]).some(t=>t.comprador===g.nome);
       const saldoCor=pct>=90?'#dc2626':pct>=50?'#d97706':'#16a34a';
       gruposHtml+=`<div style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px;">
@@ -3485,7 +3575,8 @@ async function iniciarAcoes(){
 async function cancelarFila(fKey){
   await db.ref('filaAcoes/'+fKey).remove();
 }
-async function ativarProximaDaFila(){
+async function ativarProximaDaFila(isAuto=false){
+  if(isAuto&&(ST.config?.pausado===true||!Object.values(ST.grupos).some(g=>!g.bloqueado))) return;
   const fila=Object.entries(ST.filaAcoes).filter(([,f])=>f.status==='aguardando').sort((a,b)=>(a[1].ts||0)-(b[1].ts||0));
   if(!fila.length) return;
   const [fKey,f]=fila[0];
@@ -3550,7 +3641,7 @@ async function liberarItemRaro(){
   const updates={};
   updates[`materiais/${mKey}/estoque`]=qty;
   updates[`materiais/${mKey}/raro`]=true;
-  updates[`materiais/${mKey}/acao`]=null;
+  updates[`materiais/${mKey}/acao`]={tipo:'raro',pct:0,auto:false};
   const fk=db.ref('feed').push().key;
   updates[`feed/${fk}`]={tipo:'mercado',txt:`✨ ITEM RARO liberado: ${m.nome} (${qty} unidades disponíveis — primeiro a comprar leva!)`,data:nowStr(),ts:Date.now()};
   await db.ref().update(updates);
@@ -3671,7 +3762,7 @@ function renderLojaProf(){
     const ao=ma.acao?.tipo==='oferta'&&ma.acao.fimTs>Date.now();
     const bo=mb.acao?.tipo==='oferta'&&mb.acao.fimTs>Date.now();
     if(ao&&!bo) return -1; if(!ao&&bo) return 1;
-    if(ma.raro&&!mb.raro) return -1; if(!ma.raro&&mb.raro) return 1;
+    if(isRaroAtivo(ma)&&!isRaroAtivo(mb)) return -1; if(!isRaroAtivo(ma)&&isRaroAtivo(mb)) return 1;
     return (ma.nome||'').localeCompare(mb.nome||'');
   });
 
@@ -4118,7 +4209,7 @@ function renderTurmasProf(){
       </div>
       <div>
         <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">TURMA</label>
-        <select id="ng-turma" class="input-field" style="font-size:13px;padding:9px 10px;">${turmaOpts}</select>
+        <select id="ng-turma" class="input-field" style="font-size:13px;padding:9px 10px;" onchange="ngCarregarChamada()">${turmaOpts}</select>
       </div>
       <div>
         <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">PIN (4 dígitos)</label>
@@ -4130,58 +4221,31 @@ function renderTurmasProf(){
       </div>
     </div>
     <div style="margin-bottom:12px;">
-      <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">MEMBROS (um por linha)</label>
-      <textarea id="ng-membros" class="input-field" rows="4" placeholder="João Silva&#10;Maria Souza&#10;Pedro Lima" style="font-size:13px;padding:9px 10px;resize:vertical;width:100%;box-sizing:border-box;"></textarea>
+      <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:6px;">MEMBROS</label>
+      <div id="ng-membros-wrap" style="font-size:12px;color:#94a3b8;padding:6px 2px;">Selecione uma turma para carregar a lista.</div>
+      <div id="ng-add-aluno-wrap" style="display:none;margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+        <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:6px;">➕ ADICIONAR ALUNO À CHAMADA DA TURMA</div>
+        <div style="display:flex;gap:6px;">
+          <input id="ng-novo-aluno" class="input-field" type="text" placeholder="Nome completo do aluno" style="font-size:13px;padding:8px 10px;flex:1;">
+          <button onclick="ngAdicionarAluno()" style="padding:8px 14px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">Adicionar</button>
+        </div>
+      </div>
     </div>
     <button class="btn-primary" onclick="salvarNovoGrupo()" style="width:100%;padding:10px;font-size:14px;">Criar grupo</button>
   </div>`;
 
-  const profListHtml=Object.entries(professores).map(([pk,pv])=>{
-    const turmaProf=Object.values(turmas).find(t=>t.prof===pk);
-    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;">
-      <div>
-        <span style="font-size:13px;color:#475569;font-weight:500;">${pv.nome||pk}</span>
-        <span style="font-size:11px;color:#94a3b8;margin-left:6px;">${turmaProf?.nome||'—'}</span>
-      </div>
-      <button onclick="abrirEditarProf('${pk}')" style="background:none;border:none;cursor:pointer;font-size:11px;color:#94a3b8;padding:2px 4px;font-weight:600;">✏️ editar</button>
-    </div>`;
-  }).join('') || `<div style="font-size:12px;color:#cbd5e1;padding:4px 0;">Nenhum professor cadastrado.</div>`;
-
-  const profFormHtml=`
-  <div style="margin-top:6px;">
-    <button onclick="(function(){var b=document.getElementById('np-body');var a=document.getElementById('np-arrow');var open=b.style.display==='none';b.style.display=open?'block':'none';a.textContent=open?'▴':'▾';})()" style="background:none;border:none;cursor:pointer;padding:6px 2px;display:flex;align-items:center;gap:5px;color:#94a3b8;font-size:11px;font-weight:600;letter-spacing:.04em;">
-      <span id="np-arrow">▾</span> PROFESSORES
-    </button>
-    <div id="np-body" style="display:none;padding:6px 0 4px;">
-      <div style="margin-bottom:10px;">${profListHtml}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-        <div>
-          <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">NOME</label>
-          <input id="np-nome" class="input-field" type="text" placeholder="Ex: Prof. Maria" style="font-size:13px;padding:9px 10px;">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">TURMA</label>
-          <input id="np-turma" class="input-field" type="text" placeholder="Ex: 8A" style="font-size:13px;padding:9px 10px;">
-        </div>
-        <div style="grid-column:1/-1;">
-          <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">SENHA</label>
-          <input id="np-senha" class="input-field" type="password" placeholder="Opcional" style="font-size:13px;padding:9px 10px;letter-spacing:.1em;">
-        </div>
-      </div>
-      <button onclick="criarPerfProf()" style="padding:7px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;color:#475569;">Criar perfil</button>
-      <div id="np-ok" style="display:none;font-size:11px;color:#16a34a;margin-top:8px;font-weight:500;"></div>
-    </div>
-  </div>`;
 
   // ── LISTA DE GRUPOS ───────────────────────────────
   let listaHtml='';
-  if(Object.keys(ST.grupos).length===0){
-    listaHtml=`<div class="card" style="text-align:center;color:#94a3b8;padding:2rem;">Nenhum grupo criado ainda.</div>`;
+  const turmasParaExibir=[...new Set([...minhasTurmas,...Object.keys(porTurma)])].sort((a,b)=>a.localeCompare(b));
+  if(!turmasParaExibir.length){
+    listaHtml=`<div class="card" style="text-align:center;color:#94a3b8;padding:2rem;">Nenhuma turma atribuída.</div>`;
   } else {
-    Object.entries(porTurma).sort(([a],[b])=>a.localeCompare(b)).forEach(([turma,itens])=>{
-      listaHtml+=`<div style="margin-bottom:1.25rem;">
-        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;padding:0 2px;">📚 ${turma} — ${itens.length} grupo(s)</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
+    turmasParaExibir.forEach(turma=>{
+      const itens=porTurma[turma]||[];
+      // cards de grupos
+      const gruposGrid=itens.length
+        ?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
           ${itens.map(({gKey,g})=>{
             const membros=Object.values(g.membros||{}).filter(Boolean);
             const membrosHtml=membros.length
@@ -4205,34 +4269,136 @@ function renderTurmasProf(){
               </div>
             </div>`;
           }).join('')}
-        </div>
+        </div>`
+        :`<div style="font-size:12px;color:#94a3b8;font-style:italic;padding:4px 2px;">Nenhum grupo criado nesta turma.</div>`;
+      // painel alunos sem grupo
+      const turmaKey2=getTurmaKey(turma);
+      const chamadaTurma=Object.values(ST.chamada[turmaKey2]||[]);
+      let semGrupoHtml='';
+      if(chamadaTurma.length>0){
+        const comGrupo=new Set();
+        itens.forEach(({g})=>{Object.values(g.membros||{}).filter(Boolean).forEach(m=>comGrupo.add(m));});
+        const semGrupo=chamadaTurma.filter(n=>!comGrupo.has(n));
+        semGrupoHtml=semGrupo.length>0
+          ?`<div style="margin-top:10px;background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:12px 14px;">
+              <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:8px;">⚠️ ${semGrupo.length} aluno(s) sem grupo em ${turma}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                ${semGrupo.map(n=>`<span style="font-size:12px;background:#fff;border:1px solid #fde047;border-radius:14px;padding:2px 10px;color:#78350f;">${n}</span>`).join('')}
+              </div>
+            </div>`
+          :`<div style="margin-top:8px;font-size:11px;color:#16a34a;font-weight:600;padding:2px 0;">✅ Todos os alunos da chamada estão em grupos.</div>`;
+      }
+      listaHtml+=`<div style="margin-bottom:1.5rem;">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;padding:0 2px;">📚 ${turma} — ${itens.length} grupo(s)</div>
+        ${gruposGrid}
+        ${semGrupoHtml}
       </div>`;
     });
   }
 
   wrap.innerHTML=`<div class="turmas-form-grid">
-    <div>${formHtml}${profFormHtml}</div>
+    <div>${formHtml}</div>
     <div>${listaHtml}</div>
   </div>`;
+  // Carrega checkboxes da turma já selecionada por padrão, sem precisar interagir com o seletor
+  const sel=document.getElementById('ng-turma');
+  if(sel&&!sel.value&&sel.options.length) sel.value=sel.options[0].value;
+  ngCarregarChamada();
 }
 
+function ngCarregarChamada(){
+  const turma=(document.getElementById('ng-turma')?.value||'').trim();
+  const wrap=document.getElementById('ng-membros-wrap');
+  const addWrap=document.getElementById('ng-add-aluno-wrap');
+  if(!wrap) return;
+  if(!turma){
+    wrap.innerHTML='<div style="font-size:12px;color:#94a3b8;padding:6px 2px;">Selecione uma turma para carregar a lista.</div>';
+    if(addWrap) addWrap.style.display='none';
+    return;
+  }
+  const turmaKey=getTurmaKey(turma);
+  const chamadaAlunos=Object.values(ST.chamada[turmaKey]||[]);
+  if(!chamadaAlunos.length){
+    wrap.innerHTML='<div style="font-size:12px;color:#94a3b8;font-style:italic;padding:6px 2px;">Chamada não encontrada para esta turma.</div>';
+    if(addWrap) addWrap.style.display=getProfTurmas().includes(turma)?'block':'none';
+    return;
+  }
+  // mapa: aluno → nome do grupo (apenas grupos já existentes desta turma)
+  const emOutroGrupo={};
+  Object.values(ST.grupos).forEach(g=>{
+    if(g.turma!==turma) return;
+    Object.values(g.membros||{}).filter(Boolean).forEach(m=>{ emOutroGrupo[m]=g.nome; });
+  });
+  const total=chamadaAlunos.length;
+  const rows=chamadaAlunos.map(nome=>{
+    const outro=emOutroGrupo[nome];
+    const disabled=!!outro;
+    return `<label style="display:flex;align-items:center;gap:10px;padding:7px 6px;border-bottom:1px solid #f1f5f9;cursor:${disabled?'default':'pointer'};">
+      <input type="checkbox" class="ng-chk" value="${nome.replace(/"/g,'&quot;')}"
+        ${disabled?'checked disabled':''}
+        onchange="ngAtualizarContador()"
+        style="width:16px;height:16px;accent-color:#2563eb;flex-shrink:0;cursor:${disabled?'default':'pointer'};">
+      <span style="font-size:13px;color:${disabled?'#94a3b8':'#0f172a'};flex:1;">${nome}</span>
+      ${outro?`<span style="font-size:11px;color:#94a3b8;background:#f1f5f9;border-radius:10px;padding:1px 8px;white-space:nowrap;">${outro}</span>`:''}
+    </label>`;
+  }).join('');
+  wrap.innerHTML=`
+    <div style="margin-bottom:8px;padding:7px 10px;background:#eff6ff;border-radius:8px;font-size:12px;font-weight:600;color:#1d4ed8;" id="ng-contador">0 de ${total} alunos selecionados</div>
+    <div style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:4px 8px;">${rows}</div>`;
+  if(addWrap){
+    addWrap.style.display=getProfTurmas().includes(turma)?'block':'none';
+    const inp=document.getElementById('ng-novo-aluno');
+    if(inp) inp.value='';
+  }
+}
+function ngAtualizarContador(){
+  const total=document.querySelectorAll('.ng-chk').length;
+  const sel=Array.from(document.querySelectorAll('.ng-chk:not(:disabled)')).filter(c=>c.checked).length;
+  const el=document.getElementById('ng-contador');
+  if(el) el.textContent=`${sel} de ${total} alunos selecionados`;
+}
+async function ngAdicionarAluno(){
+  const turma=(document.getElementById('ng-turma')?.value||'').trim();
+  const inp=document.getElementById('ng-novo-aluno');
+  const nome=(inp?.value||'').trim();
+  if(!nome){ showToast('⚠️ Informe o nome do aluno.'); return; }
+  if(!turma){ showToast('⚠️ Selecione uma turma.'); return; }
+  if(!getProfTurmas().includes(turma)){ showToast('⚠️ Turma não autorizada.'); return; }
+  const turmaKey=getTurmaKey(turma);
+  const chamadaAtual=Object.values(ST.chamada[turmaKey]||[]);
+  const normNome=nome.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+  const jaExiste=chamadaAtual.some(n=>n.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim()===normNome);
+  if(jaExiste){ showToast('⚠️ Aluno já está na chamada.'); return; }
+  const novaLista=[...chamadaAtual, nome];
+  try {
+    await db.ref('chamada/'+turmaKey).set(novaLista);
+    if(inp) inp.value='';
+    showToast(`✅ "${nome}" adicionado à chamada de ${turma}.`);
+    // Atualiza ST localmente para renderização imediata antes do listener disparar
+    ST.chamada[turmaKey]=novaLista;
+    ngCarregarChamada();
+    // Marca o recém-adicionado (habilitado, não pertence a nenhum grupo)
+    document.querySelectorAll('.ng-chk').forEach(c=>{ if(c.value===nome&&!c.disabled) c.checked=true; });
+    ngAtualizarContador();
+  } catch(e){
+    showToast('Erro ao adicionar aluno: '+e.message);
+  }
+}
 function salvarNovoGrupo(){
   const nome=(document.getElementById('ng-nome').value||'').trim();
   const turma=(document.getElementById('ng-turma').value||'').trim();
   const pin=(document.getElementById('ng-pin').value||'').trim();
   const saldo=parseFloat(document.getElementById('ng-saldo').value)||SI();
-  const membrosRaw=(document.getElementById('ng-membros').value||'').trim();
   if(!nome){showToast('⚠️ Informe o nome do grupo.'); return;}
   if(!turma){showToast('⚠️ Informe a turma.'); return;}
   if(!getProfTurmas().includes(turma)){showToast('⚠️ Turma não autorizada para este professor.'); return;}
   if(!pin||pin.length<3){showToast('⚠️ PIN deve ter pelo menos 3 dígitos.'); return;}
   const key=nome.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'_').replace(/[^\w]/g,'').toLowerCase()+'_'+turma.replace(/\s+/g,'').toLowerCase();
   if(ST.grupos[key]){showToast('⚠️ Já existe um grupo com esse nome nessa turma.'); return;}
-  const membros=membrosRaw?membrosRaw.split('\n').map(s=>s.trim()).filter(Boolean):[];
-  const dados={nome,turma,saldo,pin,bloqueado:false};
+  const membros=Array.from(document.querySelectorAll('.ng-chk:not(:disabled)')).filter(c=>c.checked).map(c=>c.value);
+  const dados={nome,turma,saldo,saldoInicial:saldo,pin,bloqueado:false};
   if(membros.length) dados.membros=Object.fromEntries(membros.map((m,i)=>[i,m]));
   db.ref('grupos/'+key).set(dados).then(()=>{
-    // Adiciona o grupo na lista de grupos da turma para aparecer no login
     const turmaEntry=Object.entries(turmas).find(([,t])=>t.nome===turma);
     if(turmaEntry){
       const [turmaKey,turmaData]=turmaEntry;
@@ -4244,7 +4410,7 @@ function salvarNovoGrupo(){
     showToast(`✅ Grupo "${nome}" criado!`);
     document.getElementById('ng-nome').value='';
     document.getElementById('ng-pin').value='';
-    document.getElementById('ng-membros').value='';
+    ngCarregarChamada();
   }).catch(e=>showToast('Erro: '+e.message));
 }
 
@@ -4332,21 +4498,60 @@ function salvarEdicaoGrupo(gKey){
   }).catch(e=>showToast('Erro: '+e.message));
 }
 
+function getTurmaKey(turmaNome){
+  const entry=Object.entries(turmas).find(([,t])=>t.nome===turmaNome);
+  if(entry) return entry[0];
+  // fallback: chave direta ou case-insensitive
+  const norm=(turmaNome||'').toLowerCase().replace(/\s/g,'');
+  return Object.keys(ST.chamada).find(k=>k.toLowerCase().replace(/\s/g,'')===norm)||turmaNome;
+}
 function abrirEditarMembros(gKey){
   const g=ST.grupos[gKey]; if(!g) return;
-  const membros=Object.values(g.membros||{}).filter(Boolean);
+  const turmaKey=getTurmaKey(g.turma||'');
+  const chamadaAlunos=Object.values(ST.chamada[turmaKey]||[]);
+  if(!chamadaAlunos.length){
+    abrirModal(`Membros — ${g.nome||gKey}`,
+      `<div style="padding:12px 0;font-size:13px;color:#94a3b8;">Chamada não encontrada para a turma "${g.turma||'?'}".</div>`,
+      [{txt:'Fechar',cls:'btn-sm',fn:'fecharModal()'}]);
+    return;
+  }
+  // mapa: nomeAluno → nomeOutroGrupo (excluindo o grupo atual)
+  const emOutroGrupo={};
+  Object.entries(ST.grupos).forEach(([k,gr])=>{
+    if(k===gKey||gr.turma!==g.turma) return;
+    Object.values(gr.membros||{}).filter(Boolean).forEach(m=>{ emOutroGrupo[m]=gr.nome; });
+  });
+  const membrosDeste=new Set(Object.values(g.membros||{}).filter(Boolean));
+  const selInicial=membrosDeste.size;
+  const total=chamadaAlunos.length;
+  const rows=chamadaAlunos.map(nome=>{
+    const neste=membrosDeste.has(nome);
+    const outro=emOutroGrupo[nome];
+    const disabled=!!outro&&!neste;
+    const checked=neste||!!outro;
+    return `<label style="display:flex;align-items:center;gap:10px;padding:7px 6px;border-bottom:1px solid #f1f5f9;cursor:${disabled?'default':'pointer'};">
+      <input type="checkbox" class="em-chk" value="${nome.replace(/"/g,'&quot;')}"
+        ${checked?'checked':''} ${disabled?'disabled':''}
+        onchange="atualizarContadorMembros()"
+        style="width:16px;height:16px;accent-color:#2563eb;flex-shrink:0;cursor:${disabled?'default':'pointer'};">
+      <span style="font-size:13px;color:${disabled?'#94a3b8':'#0f172a'};flex:1;">${nome}</span>
+      ${outro&&!neste?`<span style="font-size:11px;color:#94a3b8;background:#f1f5f9;border-radius:10px;padding:1px 8px;white-space:nowrap;">${outro}</span>`:''}
+    </label>`;
+  }).join('');
   abrirModal(`Membros — ${g.nome||gKey}`,`
-    <div style="margin-top:4px;">
-      <label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:6px;">UM MEMBRO POR LINHA</label>
-      <textarea id="em-membros" class="input-field" rows="7" style="font-size:13px;padding:10px;resize:vertical;width:100%;box-sizing:border-box;">${membros.join('\n')}</textarea>
-      <div style="font-size:11px;color:#94a3b8;margin-top:5px;">Edite a lista acima. Linhas em branco são ignoradas.</div>
-    </div>`,
+    <div style="margin-bottom:10px;padding:8px 12px;background:#eff6ff;border-radius:8px;font-size:13px;font-weight:600;color:#1d4ed8;" id="em-contador">${selInicial} de ${total} alunos selecionados</div>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:4px 8px;">${rows}</div>`,
     [{txt:'Salvar membros',cls:'btn-primary',fn:`salvarMembros('${gKey}')`}]);
 }
+function atualizarContadorMembros(){
+  const total=document.querySelectorAll('.em-chk').length;
+  const sel=Array.from(document.querySelectorAll('.em-chk:not(:disabled)')).filter(c=>c.checked).length;
+  const el=document.getElementById('em-contador');
+  if(el) el.textContent=`${sel} de ${total} alunos selecionados`;
+}
 function salvarMembros(gKey){
-  const raw=document.getElementById('em-membros')?.value||'';
-  const membros=raw.split('\n').map(s=>s.trim()).filter(Boolean);
-  const dadosMembros=Object.fromEntries(membros.map((m,i)=>[i,m]));
+  const membros=Array.from(document.querySelectorAll('.em-chk:not(:disabled)')).filter(c=>c.checked).map(c=>c.value);
+  const dadosMembros=membros.length?Object.fromEntries(membros.map((m,i)=>[i,m])):null;
   db.ref('grupos/'+gKey+'/membros').set(dadosMembros).then(()=>{
     showToast(`✅ Membros salvos (${membros.length}).`); fecharModal();
   }).catch(e=>showToast('Erro: '+e.message));
@@ -4374,15 +4579,15 @@ function renderRelatoriosProf(){
     else{
       const gKey=s.key, g=ST.grupos[gKey]||{};
       const compras=Object.values(g.compras||{});
-      const gastoLoja=SI()-g.saldo;
-      const pctUsado=Math.min(100,Math.round((gastoLoja/SI())*100));
+      const _si4=g.saldoInicial??g.saldo??SI(); const gastoLoja=_si4-g.saldo;
+      const pctUsado=Math.min(100,Math.round((gastoLoja/_si4)*100));
       const rS=rankingSaldo(stats),rC=rankingCompras(stats),rN=rankingNeg(stats);
       const posS=rS.findIndex(([n])=>n===relGrupoAtual)+1;
       const posC=rC.findIndex(([n])=>n===relGrupoAtual)+1;
       const posN=rN.findIndex(([n])=>n===relGrupoAtual)+1;
-      const negGrupo=ST.transacoes.filter(t=>t.comprador===relGrupoAtual||t.vendedor===relGrupoAtual);
-      const totalVendido=ST.transacoes.filter(t=>t.vendedor===relGrupoAtual).reduce((a,t)=>a+t.total,0);
-      const totalCompradoEG=ST.transacoes.filter(t=>t.comprador===relGrupoAtual).reduce((a,t)=>a+t.total,0);
+      const negGrupo=(ST.transacoes||[]).filter(t=>t.comprador===relGrupoAtual||t.vendedor===relGrupoAtual);
+      const totalVendido=(ST.transacoes||[]).filter(t=>t.vendedor===relGrupoAtual).reduce((a,t)=>a+t.total,0);
+      const totalCompradoEG=(ST.transacoes||[]).filter(t=>t.comprador===relGrupoAtual).reduce((a,t)=>a+t.total,0);
       const pendentes=compras.filter(c=>!c.entregue).length;
       // Build itensMap
       const itensMap={};
@@ -4448,7 +4653,7 @@ function renderRelatoriosProf(){
           </div>
           <div class="card" style="margin:0;">
             <div class="section-title">Financeiro</div>
-            <div class="rel-row"><span class="label" style="font-size:11px;">Inicial</span><span style="font-size:11px;">${fmt(SI())}</span></div>
+            <div class="rel-row"><span class="label" style="font-size:11px;">Inicial</span><span style="font-size:11px;">${fmt(_si4)}</span></div>
             <div class="rel-row"><span class="label" style="font-size:11px;">Loja</span><span style="color:#dc2626;font-size:11px;font-weight:600;">− ${fmt(gastoLoja)}</span></div>
             ${totalCompradoEG?`<div class="rel-row"><span class="label" style="font-size:11px;">Entre grupos</span><span style="color:#dc2626;font-size:11px;font-weight:600;">− ${fmt(totalCompradoEG)}</span></div>`:''}
             ${totalVendido?`<div class="rel-row"><span class="label" style="font-size:11px;">Vendas</span><span style="color:#16a34a;font-size:11px;font-weight:600;">+ ${fmt(totalVendido)}</span></div>`:''}
@@ -4483,11 +4688,11 @@ function exportarCSV(){
   const esc=s=>'"'+(String(s||'').replace(/"/g,'""'))+'"';
   let csv='Grupo,Turma,Saldo Final,Total Gasto,Nº Compras,Total Vendido,Nº Negociações\n';
   Object.entries(stats).forEach(([nome,s])=>{
-    const totalVendido=ST.transacoes.filter(t=>t.vendedor===nome).reduce((a,t)=>a+t.total,0);
+    const totalVendido=(ST.transacoes||[]).filter(t=>t.vendedor===nome).reduce((a,t)=>a+t.total,0);
     csv+=`${esc(nome)},${esc(s.turma)},${s.saldo.toFixed(2)},${s.totalGasto.toFixed(2)},${s.nCompras},${totalVendido.toFixed(2)},${s.nNeg}\n`;
   });
   csv+='\nTransações\nTimestamp,Comprador,Vendedor,Item,Qtd,Preço Un,Total,Via\n';
-  ST.transacoes.forEach(t=>{
+  (ST.transacoes||[]).forEach(t=>{
     csv+=`${t.ts||''},${esc(t.comprador)},${esc(t.vendedor)},${esc(t.item)},${t.qty||''},${(t.precoUn||0).toFixed(2)},${(t.total||0).toFixed(2)},${esc(t.via)}\n`;
   });
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
@@ -4640,14 +4845,14 @@ function fecharModal(forcar=false){
 async function verificarExpiracoes(){
   let algumExpirou=false;
   for(const [mKey,m] of Object.entries(ST.materiais)){
-    if(m.acao?.fimTs && m.acao.fimTs < Date.now()){
+    if(m.acao?.fimTs && m.acao.fimTs < Date.now() && m.acao.tipo !== 'raro'){
       await db.ref(`materiais/${mKey}/acao`).set(null);
       algumExpirou=true;
     }
   }
   if(algumExpirou){
     const ativas=Object.entries(ST.materiais).filter(([,m])=>m.acao?.fimTs&&m.acao.fimTs>Date.now());
-    if(ativas.length<MAX_ACOES_ATIVAS) await ativarProximaDaFila();
+    if(ativas.length<MAX_ACOES_ATIVAS) await ativarProximaDaFila(true);
   }
 }
 
