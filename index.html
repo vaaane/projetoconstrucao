@@ -293,6 +293,7 @@ body{background:var(--c-surface);}
 @keyframes lp-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 .lp-hero-img img{animation:lp-float 4s ease-in-out infinite;}
 @keyframes lp-countup{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes tvPulse { 0%,100%{opacity:1;} 50%{opacity:.78;} }
 .lp-cd-num{animation:lp-countup .5s ease;}
 @media(max-width:768px){
   .lp-hero-inner{grid-template-columns:1fr;}.lp-hero-img{display:none;}.lp-hero-title{font-size:36px;}
@@ -748,33 +749,38 @@ body{background:var(--c-surface);}
 
 <!-- TV -->
 <div id="screen-tv" class="screen">
-<div style="background:#060914;color:#fff;min-height:100vh;display:flex;flex-direction:column;font-family:var(--font-sans);overflow:hidden;">
-  <!-- Header -->
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.5rem;border-bottom:1px solid #1e293b;background:#0a0f1e;flex-shrink:0;">
-    <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;color:#f1f5f9;">🏗️ Painel TV <span style="font-size:18px;font-weight:400;color:#475569;margin-left:6px;">ao vivo</span></div>
-    <div style="display:flex;gap:16px;align-items:center;">
-      <div style="font-size:28px;font-weight:700;color:#64748b;font-variant-numeric:tabular-nums;letter-spacing:.02em;" id="tv-clock"></div>
-      <button id="tv-som-btn" class="btn-sm" onclick="ativarSomTV(this)" style="border-color:#1e293b;color:#475569;font-size:13px;" title="Ativar alertas sonoros">🔇 Som</button>
-      <button class="btn-sm" onclick="logout()" style="border-color:#1e293b;color:#475569;font-size:13px;">Sair</button>
+  <div style="height:100vh;overflow:hidden;background:#0f1729;color:#e2e8f0;display:flex;flex-direction:column;padding:18px 22px;box-sizing:border-box;font-family:inherit;">
+
+    <!-- Cabeçalho -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:38px;height:38px;background:linear-gradient(135deg,var(--c-navy,#1e3a5f),var(--c-orange,#f97316));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:22px;">🏗️</div>
+        <span style="font-size:26px;font-weight:800;color:#fff;">Painel TV</span>
+        <span style="font-size:14px;color:#64748b;">ao vivo</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <span id="tv-relogio" style="font-size:26px;font-weight:700;color:#60a5fa;font-variant-numeric:tabular-nums;">--:--:--</span>
+        <button id="tv-som-btn" onclick="ativarSomTV(this)" style="background:#1e293b;border:1px solid #334155;color:#cbd5e1;font-size:14px;padding:7px 16px;border-radius:9px;cursor:pointer;">🔇 Som</button>
+        <button onclick="logout()" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:14px;padding:7px 16px;border-radius:9px;cursor:pointer;">Sair</button>
+      </div>
     </div>
+
+    <!-- Faixa de alertas (preenchida por renderTV) -->
+    <div id="tv-alertas" style="display:grid;gap:10px;margin-bottom:16px;flex-shrink:0;"></div>
+
+    <!-- Corpo: feed (maior) + situação dos grupos -->
+    <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;flex:1;min-height:0;">
+      <div style="background:#16213a;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;min-height:0;">
+        <div style="font-size:16px;color:#94a3b8;font-weight:700;margin-bottom:14px;flex-shrink:0;">📡 Feed ao vivo</div>
+        <div id="tv-feed-wrap" style="display:flex;flex-direction:column;gap:11px;overflow:hidden;flex:1;"></div>
+      </div>
+      <div style="background:#16213a;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;min-height:0;">
+        <div style="font-size:16px;color:#94a3b8;font-weight:700;margin-bottom:14px;flex-shrink:0;">💰 Situação dos grupos</div>
+        <div id="tv-grupos-wrap" style="display:flex;flex-direction:column;gap:9px;overflow:hidden;flex:1;"></div>
+      </div>
+    </div>
+
   </div>
-  <!-- Alert bar -->
-  <div id="tv-alertas" style="flex-shrink:0;min-height:48px;padding:.65rem 1.5rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#080d1a;border-bottom:1px solid #1e293b;overflow:hidden;"></div>
-  <!-- Main area -->
-  <div style="flex:1;display:grid;grid-template-columns:2fr 1fr;min-height:0;overflow:hidden;">
-    <!-- Left: feed + group actions -->
-    <div style="display:flex;flex-direction:column;border-right:1px solid #1e293b;overflow:hidden;">
-      <div id="tv-feed-wrap" style="flex:1;padding:1.25rem 1.5rem;overflow:hidden;"></div>
-      <div id="tv-grupos-wrap" style="flex-shrink:0;padding:.85rem 1.5rem;border-top:1px solid #1e293b;background:#080d1a;"></div>
-    </div>
-    <!-- Right: actions + ranking + queue -->
-    <div style="display:flex;flex-direction:column;overflow:hidden;">
-      <div id="tv-acoes-wrap" style="flex-shrink:0;padding:1.1rem 1.25rem;border-bottom:1px solid #1e293b;"></div>
-      <div id="tv-rank-wrap" style="flex:1;padding:1.1rem 1.25rem;border-bottom:1px solid #1e293b;overflow:hidden;"></div>
-      <div id="tv-fila-wrap" style="flex-shrink:0;padding:.7rem 1.25rem;background:#080d1a;"></div>
-    </div>
-  </div>
-</div>
 </div>
 
 <!-- MODAL -->
@@ -1345,6 +1351,7 @@ function canProfDeliver(grupoKey) {
 }
 
 // ── AÇÃO AUTOMÁTICA DE MERCADO ────────────────────────
+const LIMIAR_ESTOQUE_BAIXO=10;
 const ESTOQUE_INICIAL={'Isopor_1cm':30,'EVA_colorido':100,'Palito_de_picole':500,'Palito_de_churrasco':300,'Tinta_guache_comum':60,'Areia_colorida':200,'Feltro':150,'Lixa_fina':100,'Serragem':80,'Papel_kraft':100,'Papel_aluminio':80,'Glitter_grosso':60,'Pedrisco':150,'Conjunto_eletrico':5,'Esponja_verde':50,'Tinta_guache_metalica':10};
 
 async function verificarAcaoAutomatica() {
@@ -1618,7 +1625,7 @@ function entrarProf(){
   // mantido para compatibilidade — usar checkProfSenha() agora
   checkProfSenha();
 }
-function entrarTV(){ tvAtivo=true; mostrarScreen('screen-tv'); renderTV(); if(tvIv)clearInterval(tvIv); tvIv=setInterval(renderTV,5000); if(tvClockIv)clearInterval(tvClockIv); tvClockIv=setInterval(()=>{ const e=document.getElementById('tv-clock'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },1000); }
+function entrarTV(){ tvAtivo=true; mostrarScreen('screen-tv'); renderTV(); if(tvIv)clearInterval(tvIv); tvIv=setInterval(renderTV,5000); if(tvClockIv)clearInterval(tvClockIv); tvClockIv=setInterval(()=>{ const e=document.getElementById('tv-relogio'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },1000); }
 function entrarAluno(){ document.getElementById('grupo-badge').textContent=grupoAtual; atualizarSaldo(); mostrarScreen('screen-aluno'); tabA('dashboard'); }
 function logout(){ grupoAtual=null; profAtual=null; tvAtivo=false; pinDigitado=''; grupoSelecionado=''; _STORE.removeItem(_ACESSO_KEY); _autoLoginTentado=false; if(tvIv){clearInterval(tvIv);tvIv=null;} if(tvClockIv){clearInterval(tvClockIv);tvClockIv=null;} voltarLogin(); mostrarScreen('screen-landing'); atualizarLandingStats(); }
 function mostrarScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
@@ -4760,115 +4767,84 @@ function exportarCSV(){
 }
 // ── TV ────────────────────────────────────────────────
 function renderTV(){
-  const stats=calcStats();
-  const rS=rankingSaldo(stats);
-  const maxS=rS[0]?.[1]?.saldo||1;
+  // ---- Relógio ----
+  const relEl=document.getElementById('tv-relogio');
+  if(relEl){ const d=new Date(); relEl.textContent=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }
 
-  // ── 1. BARRA DE ALERTAS ──────────────────────────────
-  const alertItems=[];
-  Object.entries(ST.materiais).forEach(([mKey,m])=>{
-    const ini=ESTOQUE_INICIAL[mKey]||100;
-    if(m.acao?.tipo==='indisponivel'&&m.acao.fimTs>Date.now())
-      alertItems.push({cor:'#ef4444',icon:'🚫',txt:`${m.nome}: INDISPONÍVEL`,key:`indis_${mKey}`,soundTipo:'acao'});
-    else if(m.estoque>0&&m.estoque<ini*0.15)
-      alertItems.push({cor:'#f97316',icon:'📦',txt:`${m.nome}: apenas ${m.estoque} restantes`,key:`stock_${mKey}_${m.estoque}`,soundTipo:'stock'});
-    if(m.raro&&m.estoque>0)
-      alertItems.push({cor:'#ca8a04',icon:'✨',txt:`ITEM RARO: ${m.nome} — ${m.estoque} unidades!`,key:`raro_${mKey}`,soundTipo:'raro'});
+  // ---- ALERTAS (item raro + estoque baixo + ação de mercado) ----
+  const alertas=[];
+  const somItems=[];
+  Object.entries(ST.materiais||{}).forEach(([mKey,m])=>{
+    if(isRaroAtivo(m)){
+      alertas.push({cor:'raro', icone:'✨', titulo:'ITEM RARO', texto:`${m.nome} — ${m.estoque} unidades`});
+      somItems.push({key:'raro-'+mKey, soundTipo:'raro'});
+    }
+    if(m.estoque>0 && m.estoque<LIMIAR_ESTOQUE_BAIXO){
+      alertas.push({cor:'stock', icone:'⚠️', titulo:'ESTOQUE BAIXO', texto:`${m.nome} — só ${m.estoque} restantes`});
+      somItems.push({key:'stock-'+mKey, soundTipo:'stock'});
+    }
+    if(m.acao?.fimTs && m.acao.fimTs>Date.now() && m.acao.tipo!=='indisponivel' && m.acao.tipo!=='raro'){
+      const lbl=m.acao.tipo==='oferta'?'OFERTA':m.acao.tipo==='alta'?'ALTA DE PREÇO':'ESCASSEZ';
+      alertas.push({cor:'acao', icone:'🔥', titulo:lbl, texto:`${m.nome}${m.acao.pct?` ${m.acao.pct}%`:''}`});
+      somItems.push({key:'acao-'+mKey+'-'+m.acao.fimTs, soundTipo:'acao'});
+    }
   });
-  Object.entries(ST.propostas||{}).filter(([,p])=>p.status==='aberta').forEach(([pk,p])=>{
-    alertItems.push({cor:'#22d3ee',icon:'💰',txt:`${p.vendedor} vendendo ${p.qty}× ${p.item} a ${fmt(p.precoUn)}/un`,key:`prop_${pk}`,soundTipo:'mercado'});
-  });
-  if(document.getElementById('screen-tv')?.style.display!=='none') checkTvSounds(alertItems);
-  const alertBar=alertItems.length
-    ?alertItems.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:9px 20px;border-radius:24px;border:1.5px solid ${a.cor}66;background:${a.cor}22;white-space:nowrap;flex-shrink:0;">
-        <span style="font-size:26px;">${a.icon}</span>
-        <span style="font-size:22px;font-weight:800;color:${a.cor};letter-spacing:.01em;">${a.txt}</span>
-      </div>`).join('')
-    :`<span style="font-size:20px;color:#334155;font-weight:600;">✓ Mercado tranquilo — nenhum alerta no momento.</span>`;
 
-  // ── 2. FEED AO VIVO ──────────────────────────────────
-  const feedItems=ST.feed.slice().reverse().slice(0,8);
-  const feedHtml=`<div style="font-size:15px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;">📡 Feed ao Vivo</div>`
-    +feedItems.map((f,i)=>{
-      const cor=f.tipo==='compra'?'#4ade80':f.tipo==='mercado'?'#fbbf24':f.tipo==='entrega'?'#60a5fa':'#6366f1';
-      const op=i===0?1:i<3?.8:.55;
-      const sz=i===0?'26px':i<3?'20px':'17px';
-      const fw=i===0?'800':i<3?'600':'400';
-      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-bottom:1px solid #0f172a;opacity:${op};">
-        <div style="width:5px;min-height:36px;background:${cor};border-radius:2px;margin-top:3px;flex-shrink:0;"></div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:${sz};color:#e2e8f0;font-weight:${fw};line-height:1.35;word-break:break-word;">${f.txt}</div>
-          <div style="font-size:14px;color:#334155;margin-top:2px;">${f.data||''}</div>
-        </div>
-      </div>`;
-    }).join('')
-    +(feedItems.length===0?`<div style="font-size:18px;color:#334155;padding:1rem 0;">Nenhuma atividade ainda.</div>`:'');
+  const corCfg={
+    raro:{bg:'#422006',bd:'#a16207',fg:'#fbbf24'},
+    stock:{bg:'#450a0a',bd:'#b91c1c',fg:'#f87171'},
+    acao:{bg:'#3b1764',bd:'#7c3aed',fg:'#c4b5fd'}
+  };
+  const alEl=document.getElementById('tv-alertas');
+  if(alEl){
+    if(!alertas.length){ alEl.innerHTML=''; alEl.style.display='none'; }
+    else{
+      alEl.style.display='grid';
+      alEl.style.gridTemplateColumns = alertas.length===1?'1fr':'1fr 1fr';
+      alEl.innerHTML=alertas.map(a=>{
+        const c=corCfg[a.cor];
+        return `<div style="background:${c.bg};border:1px solid ${c.bd};border-radius:11px;padding:13px 18px;display:flex;align-items:center;gap:12px;animation:tvPulse 1.6s ease-in-out infinite;">
+          <span style="font-size:26px;">${a.icone}</span>
+          <div><div style="font-size:13px;color:${c.fg};font-weight:700;letter-spacing:.03em;">${a.titulo}</div>
+          <div style="font-size:19px;font-weight:700;color:#fff;">${a.texto}</div></div>
+        </div>`;
+      }).join('');
+    }
+  }
+  if(typeof checkTvSounds==='function') checkTvSounds(somItems);
 
-  // ── 3. AÇÕES DOS GRUPOS ──────────────────────────────
-  const recentTx=Array.isArray(ST.transacoes)?ST.transacoes.slice(-5).reverse():Object.values(ST.transacoes||{}).slice(-5).reverse();
-  const gruposHtml=`<div style="font-size:14px;color:#334155;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px;">⚡ Ações dos Grupos</div>`
-    +(recentTx.length
-      ?`<div style="display:flex;gap:8px;flex-wrap:wrap;">${recentTx.map(t=>`<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:7px 14px;font-size:17px;white-space:nowrap;">
-          <span style="color:#4ade80;font-weight:700;">${t.vendedor}</span>
-          <span style="color:#475569;"> vendeu </span>
-          <span style="color:#f1f5f9;font-weight:600;">${t.qty}× ${t.item}</span>
-          <span style="color:#475569;"> para </span>
-          <span style="color:#60a5fa;font-weight:700;">${t.comprador}</span>
-        </div>`).join('')}</div>`
-      :`<span style="font-size:17px;color:#334155;">Nenhuma transação entre grupos ainda.</span>`);
-
-  // ── 4. AÇÕES ATIVAS ──────────────────────────────────
-  const ativas=Object.entries(ST.materiais).filter(([,m])=>m.acao?.fimTs&&m.acao.fimTs>Date.now()&&m.acao.tipo!=='indisponivel');
-  const acoesHtml=`<div style="font-size:15px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">🔥 Ações Ativas</div>`
-    +(ativas.length
-      ?ativas.map(([mKey,m])=>{
-          const al=getAcaoLabel(m.nome); if(!al) return '';
-          const cor=m.acao.tipo==='oferta'?'#4ade80':m.acao.tipo==='alta'?'#f87171':'#fbbf24';
-          const bg=m.acao.tipo==='oferta'?'#052e16':m.acao.tipo==='alta'?'#1c0a0a':'#1c1003';
-          const preco=getPrecoAtual(m.nome);
-          const info=MAT_INFO[mKey]||{}; const emoji=m.emoji||info.emoji||'📦';
-          return `<div style="background:${bg};border:1px solid ${cor}40;border-radius:10px;padding:12px 14px;margin-bottom:8px;">
-            <div style="font-size:17px;font-weight:800;color:${cor};margin-bottom:3px;">${al.txt}</div>
-            <div style="font-size:22px;font-weight:700;color:#e2e8f0;">${emoji} ${m.nome}</div>
-            <div style="font-size:17px;color:#94a3b8;margin-top:3px;">${fmt(preco)} · ⏱ ${al.mins}min restantes</div>
+  // ---- FEED AO VIVO ----
+  const feedArr=Array.isArray(ST.feed)?ST.feed:Object.values(ST.feed||{});
+  const ultimos=feedArr.slice().sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,6);
+  const corTipo={compra:'#22c55e', mercado:'#fbbf24', entrega:'#60a5fa'};
+  const feedEl=document.getElementById('tv-feed-wrap');
+  if(feedEl){
+    feedEl.innerHTML = ultimos.length
+      ? ultimos.map(f=>{
+          const cor=corTipo[f.tipo]||'#64748b';
+          return `<div style="border-left:4px solid ${cor};padding-left:12px;">
+            <div style="font-size:18px;color:#fff;line-height:1.3;">${f.txt||''}</div>
+            <div style="font-size:12px;color:#64748b;">${f.data||''}</div>
           </div>`;
         }).join('')
-      :`<div style="font-size:18px;color:#334155;padding:6px 0;">Nenhuma ação ativa.</div>`);
+      : `<div style="font-size:16px;color:#64748b;">Nenhuma atividade ainda.</div>`;
+  }
 
-  // ── 5. RANKING SALDO ─────────────────────────────────
-  const rankHtml=`<div style="font-size:15px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;">🏆 Ranking — Saldo</div>`
-    +rS.slice(0,5).map(([nome,s],i)=>{
-      const cor=i===0?'#fbbf24':i===1?'#94a3b8':i===2?'#cd7f32':'#475569';
-      const pct=Math.round((s.saldo/maxS)*100);
-      return `<div style="padding:8px 0;border-bottom:1px solid #0f172a;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
-          <div style="font-size:24px;min-width:36px;text-align:center;">${posEmoji(i)}</div>
-          <div style="flex:1;font-size:20px;font-weight:700;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nome}</div>
-          <div style="font-size:20px;font-weight:800;color:${cor};flex-shrink:0;">${fmt(s.saldo)}</div>
-        </div>
-        <div style="height:6px;background:#0f172a;border-radius:3px;margin-left:46px;"><div style="height:100%;width:${pct}%;background:${cor};border-radius:3px;transition:width .5s;"></div></div>
-      </div>`;
-    }).join('');
-
-  // ── 6. FILA ──────────────────────────────────────────
-  const fila=Object.entries(ST.filaAcoes||{}).filter(([,f])=>f.status==='aguardando').sort((a,b)=>(a[1].ts||0)-(b[1].ts||0));
-  const filaHtml=fila.length
-    ?`<div style="font-size:14px;color:#334155;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">📋 Próximas</div>`
-      +fila.slice(0,3).map(([,f],i)=>{
-        const mNome=ST.materiais[f.mKey]?.nome||f.mKey;
-        const tipoLabel={oferta:'Desconto',alta:'Alta',escassez:'Escassez'}[f.tipo]||f.tipo;
-        return `<div style="font-size:16px;color:#475569;padding:3px 0;">${i+1}. ${mNome} — ${tipoLabel}${f.pct?` ${f.pct}%`:''} · ${f.dur}min</div>`;
-      }).join('')
-    :`<div style="font-size:15px;color:#1e293b;">Fila vazia.</div>`;
-
-  // ── Apply ─────────────────────────────────────────────
-  const set=(id,html)=>{const e=document.getElementById(id);if(e)e.innerHTML=html;};
-  set('tv-alertas',  alertBar);
-  set('tv-feed-wrap',feedHtml);
-  set('tv-grupos-wrap',gruposHtml);
-  set('tv-acoes-wrap',acoesHtml);
-  set('tv-rank-wrap', rankHtml);
-  set('tv-fila-wrap', filaHtml);
+  // ---- SITUAÇÃO DOS GRUPOS ----
+  const stats=(typeof calcStats==='function')?calcStats():null;
+  let ranking=[];
+  if(typeof rankingSaldo==='function' && stats){ ranking=rankingSaldo(stats); }
+  else { ranking=Object.entries(ST.grupos||{}).map(([,g])=>[g.nome,{saldo:g.saldo||0}]).sort((a,b)=>(b[1].saldo||0)-(a[1].saldo||0)); }
+  const grEl=document.getElementById('tv-grupos-wrap');
+  if(grEl){
+    grEl.innerHTML = ranking.length
+      ? ranking.map(([nome,s])=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:9px;padding:11px 14px;">
+            <span style="font-size:18px;color:#fff;font-weight:600;">${nome}</span>
+            <span style="font-size:18px;color:#cbd5e1;font-variant-numeric:tabular-nums;">${typeof fmt==='function'?fmt(s.saldo):('R$ '+(s.saldo||0))}</span>
+          </div>`).join('')
+      : `<div style="font-size:16px;color:#64748b;">Nenhum grupo ainda.</div>`;
+  }
 }
 
 // ── MODAL ─────────────────────────────────────────────
