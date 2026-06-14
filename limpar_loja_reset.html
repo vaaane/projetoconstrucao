@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reset Completo da Loja</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #fff8e1;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 3px solid #f59e0b;
+      border-radius: 12px;
+      max-width: 600px;
+      width: 100%;
+      padding: 36px 40px;
+      box-shadow: 0 4px 24px rgba(245, 158, 11, 0.15);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .header .icon {
+      font-size: 36px;
+      line-height: 1;
+    }
+
+    h1 {
+      font-size: 22px;
+      color: #92400e;
+      font-weight: 700;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #dc2626;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
+    .descricao {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      border-radius: 4px;
+      padding: 14px 16px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      color: #78350f;
+      line-height: 1.6;
+    }
+
+    .descricao strong { color: #92400e; }
+
+    .apaga, .preserva {
+      margin-bottom: 20px;
+    }
+
+    .apaga h2, .preserva h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .apaga h2 { color: #dc2626; }
+    .preserva h2 { color: #16a34a; }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+
+    .tag.red { background: #fee2e2; color: #991b1b; }
+    .tag.green { background: #dcfce7; color: #166534; }
+
+    .divisor {
+      border: none;
+      border-top: 1px solid #fde68a;
+      margin: 24px 0;
+    }
+
+    .confirmacao {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: #fef2f2;
+      border: 1.5px solid #fca5a5;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+      cursor: pointer;
+    }
+
+    .confirmacao input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      min-width: 20px;
+      cursor: pointer;
+      accent-color: #dc2626;
+      margin-top: 1px;
+    }
+
+    .confirmacao label {
+      font-size: 14px;
+      color: #7f1d1d;
+      font-weight: 600;
+      line-height: 1.5;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #btnReset {
+      width: 100%;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      cursor: not-allowed;
+      background: #d1d5db;
+      color: #9ca3af;
+      transition: background 0.2s, color 0.2s, transform 0.1s;
+      letter-spacing: 0.3px;
+    }
+
+    #btnReset.ativo {
+      background: #dc2626;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #btnReset.ativo:hover { background: #b91c1c; }
+    #btnReset.ativo:active { transform: scale(0.98); }
+
+    #btnReset:disabled {
+      opacity: 1;
+    }
+
+    #status {
+      margin-top: 24px;
+      display: none;
+    }
+
+    .status-loading {
+      text-align: center;
+      color: #92400e;
+      font-size: 14px;
+      padding: 12px;
+    }
+
+    .status-loading .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #fde68a;
+      border-top-color: #f59e0b;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-sucesso {
+      background: #f0fdf4;
+      border: 2px solid #86efac;
+      border-radius: 8px;
+      padding: 20px;
+      color: #15803d;
+    }
+
+    .status-sucesso h3 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-sucesso ul {
+      padding-left: 20px;
+      font-size: 13px;
+      line-height: 1.9;
+    }
+
+    .status-sucesso .aviso-novos {
+      margin-top: 12px;
+      background: #fefce8;
+      border: 1px solid #fde047;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #713f12;
+    }
+
+    .status-erro {
+      background: #fef2f2;
+      border: 2px solid #fca5a5;
+      border-radius: 8px;
+      padding: 16px;
+      color: #991b1b;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="header">
+    <span class="icon">⚠️</span>
+    <div>
+      <h1>Reset Completo da Loja <span class="badge">Irreversível</span></h1>
+    </div>
+  </div>
+
+  <div class="descricao">
+    Esta ferramenta apaga <strong>todos os grupos, transações, propostas, histórico e filas</strong> do Realtime Database,
+    e restaura o estoque dos materiais conhecidos para os valores iniciais.<br><br>
+    Use somente para começar um novo ciclo do projeto do <strong>zero absoluto</strong>.
+    A ação <strong>não pode ser desfeita</strong>.
+  </div>
+
+  <div class="apaga">
+    <h2>O que será apagado</h2>
+    <div class="tag-list">
+      <span class="tag red">grupos</span>
+      <span class="tag red">transacoes</span>
+      <span class="tag red">propostas</span>
+      <span class="tag red">feed</span>
+      <span class="tag red">filaAcoes</span>
+      <span class="tag red">limiteDiario</span>
+      <span class="tag red">historicoPrecos</span>
+      <span class="tag red">materiais/*/acao</span>
+      <span class="tag red">turmas/*/grupos</span>
+    </div>
+  </div>
+
+  <div class="preserva">
+    <h2>O que será preservado</h2>
+    <div class="tag-list">
+      <span class="tag green">professores</span>
+      <span class="tag green">turmas (estrutura)</span>
+      <span class="tag green">kits</span>
+      <span class="tag green">config</span>
+      <span class="tag green">matInfo</span>
+    </div>
+  </div>
+
+  <hr class="divisor" />
+
+  <div class="confirmacao" onclick="toggleCheck()">
+    <input type="checkbox" id="chkConfirma" />
+    <label for="chkConfirma">
+      Eu entendo que isso apaga todos os grupos e o histórico — ação irreversível.
+    </label>
+  </div>
+
+  <button id="btnReset" disabled onclick="executarReset()">
+    Resetar Loja Agora
+  </button>
+
+  <div id="status"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyDEdess13NeMr9Ewpzp6r07cxzk7hRMNSM",
+    authDomain: "minhacasameuprojeto.firebaseapp.com",
+    databaseURL: "https://minhacasameuprojeto-default-rtdb.firebaseio.com",
+    projectId: "minhacasameuprojeto",
+    storageBucket: "minhacasameuprojeto.firebasestorage.app",
+    messagingSenderId: "443988595578",
+    appId: "1:443988595578:web:3cc39f96515c675890bcc3"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // Estoque semente — apenas materiais conhecidos serão restaurados
+  const ESTOQUE_SEMENTE = {
+    Isopor_1cm: 30,
+    EVA_colorido: 100,
+    Palito_de_picole: 500,
+    Palito_de_churrasco: 300,
+    Tinta_guache_comum: 60,
+    Areia_colorida: 200,
+    Feltro: 150,
+    Lixa_fina: 100,
+    Serragem: 80,
+    Papel_kraft: 100,
+    Papel_aluminio: 80,
+    Glitter_grosso: 60,
+    Pedrisco: 150,
+    Conjunto_eletrico: 5,
+    Esponja_verde: 50,
+    Tinta_guache_metalica: 10
+  };
+
+  function toggleCheck() {
+    const chk = document.getElementById('chkConfirma');
+    chk.checked = !chk.checked;
+    const btn = document.getElementById('btnReset');
+    btn.disabled = !chk.checked;
+    btn.classList.toggle('ativo', chk.checked);
+  }
+
+  // Impede que clique direto no checkbox dispare toggleCheck duas vezes
+  document.getElementById('chkConfirma').addEventListener('click', e => e.stopPropagation());
+  document.getElementById('chkConfirma').addEventListener('change', () => {
+    const chk = document.getElementById('chkConfirma');
+    const btn = document.getElementById('btnReset');
+    btn.disabled = !chk.checked;
+    btn.classList.toggle('ativo', chk.checked);
+  });
+
+  function setStatus(html) {
+    const el = document.getElementById('status');
+    el.style.display = 'block';
+    el.innerHTML = html;
+  }
+
+  async function executarReset() {
+    const btn = document.getElementById('btnReset');
+    btn.disabled = true;
+    btn.classList.remove('ativo');
+    btn.textContent = 'Executando…';
+
+    setStatus(`<div class="status-loading"><span class="spinner"></span>Lendo materiais e turmas do banco…</div>`);
+
+    try {
+      // 1. Ler materiais e turmas em paralelo
+      const [snapMat, snapTurmas] = await Promise.all([
+        db.ref('materiais').once('value'),
+        db.ref('turmas').once('value')
+      ]);
+      const materiais = snapMat.val() || {};
+      const chavesMateriais = Object.keys(materiais);
+      const turmas = snapTurmas.val() || {};
+      const chavesTurmas = Object.keys(turmas);
+
+      // 2. Montar update multi-path
+      const update = {};
+
+      // Nós a apagar
+      const nosApagar = ['grupos', 'transacoes', 'propostas', 'feed', 'filaAcoes', 'limiteDiario', 'historicoPrecos'];
+      nosApagar.forEach(no => { update[no] = null; });
+
+      // Materiais: limpar acao e restaurar estoque quando na semente
+      let restaurados = 0;
+      const novosMantiods = [];
+
+      chavesMateriais.forEach(key => {
+        update[`materiais/${key}/acao`] = null;
+
+        if (key in ESTOQUE_SEMENTE) {
+          update[`materiais/${key}/estoque`] = ESTOQUE_SEMENTE[key];
+          restaurados++;
+        } else {
+          novosMantiods.push(key);
+        }
+      });
+
+      // Turmas: esvaziar array grupos de cada turma
+      chavesTurmas.forEach(key => {
+        update[`turmas/${key}/grupos`] = [];
+      });
+
+      setStatus(`<div class="status-loading"><span class="spinner"></span>Aplicando reset no banco…</div>`);
+
+      // 3. Executar tudo de uma vez
+      await db.ref().update(update);
+
+      // 4. Montar mensagem de resultado
+      const listaApagados = nosApagar.map(n => `<li><code>${n}</code></li>`).join('');
+      const avisoNovos = novosMantiods.length > 0
+        ? `<div class="aviso-novos">
+            ⚠️ <strong>${novosMantiods.length} material(is) novo(s) não estão na semente</strong> e tiveram apenas o campo <code>acao</code> limpo — o estoque deles foi mantido como estava:<br>
+            <strong>${novosMantiods.join(', ')}</strong>
+           </div>`
+        : '';
+
+      setStatus(`
+        <div class="status-sucesso">
+          <h3>✅ Reset concluído com sucesso!</h3>
+          <ul>
+            <li>Nós apagados: <ul>${listaApagados}</ul></li>
+            <li>Lista de grupos esvaziada em <strong>${chavesTurmas.length}</strong> turma(s)</li>
+            <li>Campo <code>acao</code> limpo em <strong>${chavesMateriais.length}</strong> material(is)</li>
+            <li>Estoque restaurado ao valor inicial em <strong>${restaurados}</strong> material(is)</li>
+          </ul>
+          ${avisoNovos}
+        </div>
+      `);
+
+    } catch (err) {
+      setStatus(`<div class="status-erro">❌ <strong>Erro ao executar o reset:</strong><br>${err.message}</div>`);
+      btn.disabled = false;
+      btn.classList.add('ativo');
+      btn.textContent = 'Resetar Loja Agora';
+    }
+  }
+</script>
+</body>
+</html>
