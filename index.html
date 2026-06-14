@@ -1242,7 +1242,7 @@ function calcStats() {
   Object.entries(ST.grupos).forEach(([key,g])=>{
     const nome = g.nome||key;
     const si=g.saldoInicial??g.saldo??SI(); const gasto = si-g.saldo;
-    const compras = g.compras ? Object.values(g.compras) : [];
+    const compras = g.compras ? Object.values(g.compras).filter(c=>!c.cancelada) : [];
     const nCompras = compras.length;
     const totalGasto = compras.reduce((a,c)=>a+c.total,0);
     const nNeg = (ST.transacoes||[]).filter(t=>t.comprador===nome||t.vendedor===nome).length;
@@ -1331,6 +1331,11 @@ function getGrupoAtualData() {
 }
 function getGrupoKey(nome) {
   return Object.entries(ST.grupos).find(([,g])=>g.nome===nome)?.[0]||null;
+}
+function simulacaoBloqueada(){
+  if(ST.config?.pausado!==true) return false;
+  showToast('⏸ Simulação pausada — aguarde o professor.');
+  return true;
 }
 function getProfTurmas() {
   return Object.values(turmas).filter(t=>t.prof===profAtual).map(t=>t.nome);
@@ -2024,6 +2029,7 @@ async function comprarKit(kKey){
     [{txt:`Comprar — R$ ${fmt(total)}`,cls:'btn-primary',fn:`confirmarCompraKit('${kKey}')`}]);
 }
 async function confirmarCompraKit(kKey){
+  if(simulacaoBloqueada()) return;
   const kit=ST.kits[kKey]; if(!kit) return;
   const g=getGrupoAtualData(); if(!g) return;
   const gKey=Object.entries(ST.grupos).find(([,gr])=>gr.nome===ST.grupoAtual)?.[0];
@@ -2145,6 +2151,7 @@ function renderCarrinho(){
 }
 
 async function checkoutFromCart(){
+  if(simulacaoBloqueada()) return;
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const gKey=getGrupoKey(grupoAtual); if(!gKey) return;
   const limTrans=ST.config?.limiteTransacao??20;
@@ -2198,7 +2205,7 @@ async function checkoutFromCart(){
 }
 
 async function finalizarCompra(){
-  if(ST.config?.pausado){alert('Simulação pausada pelo professor.');return;}
+  if(simulacaoBloqueada()) return;
   if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const gKey=getGrupoKey(grupoAtual); if(!gKey) return;
@@ -2371,7 +2378,7 @@ function atualizarLimiteVenda(){
   if(precoEl&&!precoEl.value&&catMat) precoEl.value=catMat.preco.toFixed(2);
 }
 async function criarVenda(){
-  if(ST.config?.pausado){alert('Simulação pausada pelo professor.');return;}
+  if(simulacaoBloqueada()) return;
   if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
   const nome=document.getElementById('venda-mat')?.value;
@@ -2395,7 +2402,7 @@ async function cancelarVenda(key){
   await db.ref('propostas/'+key).remove();
 }
 async function aceitarVenda(key){
-  if(ST.config?.pausado){alert('Simulação pausada pelo professor.');return;}
+  if(simulacaoBloqueada()) return;
   if(ST.config?.timerFim && ST.config.timerFim < Date.now()){alert('Tempo da simulação encerrado!');return;}
   const p=ST.propostas[key]; if(!p||p.status!=='aberta'){alert('Oferta não disponível.');return;}
   const g=getGrupoAtualData(); if(!g||g.bloqueado){alert('Grupo bloqueado.');return;}
@@ -2672,6 +2679,7 @@ function abrirNovaOferta(){
   setTimeout(()=>{document.getElementById('m-qty')?.addEventListener('input',upd);document.getElementById('m-preco')?.addEventListener('input',upd);upd();},100);
 }
 async function publicarOferta(){
+  if(simulacaoBloqueada()) return;
   const item=document.getElementById('m-item')?.value;
   const qty=parseInt(document.getElementById('m-qty')?.value)||0;
   const precoUn=parseFloat(document.getElementById('m-preco')?.value)||0;
@@ -2684,6 +2692,7 @@ async function publicarOferta(){
   fecharModal(); alert('Oferta publicada!');
 }
 async function aceitarProposta(key){
+  if(simulacaoBloqueada()) return;
   const p=ST.propostas[key]; if(!p||p.status!=='aberta'){alert('Oferta não disponível.');return;}
   const gComprador=getGrupoAtualData(); if(!gComprador){return;}
   if(gComprador.bloqueado){alert('Seu grupo está bloqueado.');return;}
@@ -2718,6 +2727,7 @@ function abrirContraproposta(key){
     [{txt:'Enviar contraproposta',cls:'btn-primary',fn:`enviarContraproposta('${key}')`}]);
 }
 async function enviarContraproposta(key){
+  if(simulacaoBloqueada()) return;
   const p=ST.propostas[key]; if(!p) return;
   const novoPreco=parseFloat(document.getElementById('cp-preco')?.value)||0;
   if(novoPreco<=0){alert('Preço inválido.');return;}
@@ -2731,6 +2741,7 @@ async function enviarContraproposta(key){
   fecharModal();
 }
 async function aceitarContraproposta(key){
+  if(simulacaoBloqueada()) return;
   const p=ST.propostas[key]; if(!p||p.status!=='contraproposta') return;
   const precoFinal=p.contraPrecoUn;
   const totalFinal=Math.round(p.qty*precoFinal*100)/100;
@@ -2923,19 +2934,28 @@ function renderRelatorioAluno(){
 // ── NOTAS FISCAIS ALUNO ───────────────────────────────
 function renderNotasAluno(){
   const g=getGrupoAtualData(); if(!g) return;
-  const compras=g.compras?Object.values(g.compras).sort((a,b)=>(b.ts||0)-(a.ts||0)):[];
-  if(!compras.length){
+  const todas=g.compras?Object.values(g.compras).sort((a,b)=>(b.ts||0)-(a.ts||0)):[];
+  if(!todas.length){
     document.getElementById('tab-notas').innerHTML='<div class="card" style="text-align:center;padding:2rem;"><div style="font-size:36px;margin-bottom:8px;">🧾</div><div style="font-size:14px;color:#94a3b8;">Nenhuma nota fiscal ainda.</div></div>';
     return;
   }
-  const pendentes=compras.filter(c=>!c.entregue).length;
-  document.getElementById('tab-notas').innerHTML=`
-    <div style="padding-top:.75rem;">
-      <div style="font-size:12px;color:#64748b;margin-bottom:10px;">${compras.length} nota(s) · <span style="color:#dc2626;">${pendentes} pendente(s)</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;">
-        ${compras.map(c=>`<div class="nf-item">${renderNF(c,grupoAtual)}</div>`).join('')}
-      </div>
-    </div>`;
+  const canceladas=todas.filter(c=>c.cancelada);
+  const ativas=todas.filter(c=>!c.cancelada);
+  const aguardando=ativas.filter(c=>!c.entregue);
+  const entregues=ativas.filter(c=>c.entregue);
+  let html=`<div style="padding-top:.75rem;">
+    <div style="font-size:12px;color:#64748b;margin-bottom:10px;">${ativas.length} nota(s) · <span style="color:#dc2626;">${aguardando.length} pendente(s)</span>${canceladas.length?` · <span style="color:#6b7280;">${canceladas.length} cancelada(s)</span>`:''}</div>`;
+  if(aguardando.length) html+=`
+    <div style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;">⏳ Aguardando entrega (${aguardando.length})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">${aguardando.map(c=>`<div class="nf-item">${renderNF(c,grupoAtual)}</div>`).join('')}</div>`;
+  if(entregues.length) html+=`
+    <div style="font-size:11px;font-weight:700;color:#16a34a;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;">✓ Entregues (${entregues.length})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">${entregues.map(c=>`<div class="nf-item" style="opacity:.85;">${renderNF(c,grupoAtual)}</div>`).join('')}</div>`;
+  if(canceladas.length) html+=`
+    <div style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;">❌ Canceladas (${canceladas.length})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">${canceladas.map(c=>`<div class="nf-item" style="opacity:.45;filter:grayscale(.7);">${renderNF(c,grupoAtual)}</div>`).join('')}</div>`;
+  html+='</div>';
+  document.getElementById('tab-notas').innerHTML=html;
 }
 
 // ── PAINEL PROFESSOR ──────────────────────────────────
@@ -2946,8 +2966,8 @@ function renderPainelProf(){
   const todosGruposKeys=minhasTurmas.flatMap(t=>(t.grupos||[]).map(gNome=>Object.entries(ST.grupos).find(([,g])=>g.nome===gNome))).filter(Boolean);
   const minhaTurmaSet=new Set(todosGruposKeys.map(([,g])=>g.nome));
   const totGasto=todosGruposKeys.reduce((a,[,g])=>a+((g.saldoInicial??g.saldo??SI())-g.saldo),0);
-  const totComp=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).length,0);
-  const totPend=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).filter(c=>!c.entregue).length,0);
+  const totComp=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).filter(c=>!c.cancelada).length,0);
+  const totPend=todosGruposKeys.reduce((a,[,g])=>a+Object.values(g.compras||{}).filter(c=>!c.entregue&&!c.cancelada).length,0);
 
   // ── Alertas por grupo ──
   const alertas=[];
@@ -2964,7 +2984,7 @@ function renderPainelProf(){
     else if(pctGasto>=50) linhas.push({prio:1,html:`<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f1f5f9;"><span style="font-size:11px;padding:2px 8px;border-radius:6px;background:#fffbeb;color:#d97706;font-weight:700;border:1px solid #fde68a;">⚠️ ${pctGasto}% do crédito gasto</span></div>`});
 
     // Compras pendentes (loja e mercado) deste grupo
-    comprasArr.filter(c=>!c.entregue).forEach(c=>{
+    comprasArr.filter(c=>!c.entregue&&!c.cancelada).forEach(c=>{
       const itensStr=Object.values(c.itens||{}).map(i=>`${i.qty}× ${i.nome}`).join(', ');
       const isMerc=c.via==='mercado'||c.via==='revenda'||c.via==='contraproposta aceita'||c.via==='compra direta';
       const viaTag=isMerc
@@ -3703,18 +3723,20 @@ function renderEntregasProf(){
     else outros.push([gKey,g]);
   });
   const lista=entregasFiltro==='todas'?[...meus,...outros]:meus;
-  // Flatten all NFs
-  const pendentes=[], entregues=[];
+  // Flatten all NFs into 3 buckets
+  const pendentes=[], entregues=[], canceladas=[];
   lista.forEach(([gKey,g])=>{
     const isMeu=minhasTurmas.includes(g.turma);
     Object.entries(g.compras||{}).forEach(([cKey,c])=>{
-      if(!c.entregue) pendentes.push({gKey,cKey,c,gNome:g.nome,isMeu});
+      if(c.cancelada) canceladas.push({gKey,cKey,c,gNome:g.nome,isMeu});
+      else if(!c.entregue) pendentes.push({gKey,cKey,c,gNome:g.nome,isMeu});
       else entregues.push({gKey,cKey,c,gNome:g.nome,isMeu});
     });
   });
   // Sort by ts
   pendentes.sort((a,b)=>(a.c.ts||0)-(b.c.ts||0));
   entregues.sort((a,b)=>(b.c.ts||0)-(a.c.ts||0));
+  canceladas.sort((a,b)=>(b.c.ts||0)-(a.c.ts||0));
   let h='';
   if(pendentes.length){
     h+=`<div class="card" style="margin-bottom:.75rem;">
@@ -3722,34 +3744,50 @@ function renderEntregasProf(){
       <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
     pendentes.forEach(({gKey,cKey,c,gNome,isMeu})=>{
       const via=c.via; const isNegocio=via==='mercado'||via==='revenda'||via==='compra direta'||via==='contraproposta aceita';
+      const isLoja=!via;
       const borderCol=isNegocio?'#ddd6fe':'#fecaca'; const bgCol=isNegocio?'#f5f3ff':'#fef2f2';
       h+=`<div class="nf-item" style="border:2px solid ${borderCol};border-radius:10px;background:${bgCol};padding:10px;">
         ${renderNF(c,gNome)}
         <div style="margin-top:8px;text-align:center;">
           ${isMeu?`<button onclick="marcarEntregue('${gKey}','${cKey}')" class="btn-success" style="width:100%;padding:8px;font-size:13px;">✓ Confirmar entrega</button>`
                 :`<div style="font-size:11px;color:#94a3b8;padding:6px;">Somente o prof. da turma.</div>`}
+          ${isMeu&&isLoja?`<button onclick="cancelarNotaFiscal('${gKey}','${cKey}')" style="width:100%;padding:6px;font-size:12px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;margin-top:4px;">✕ Cancelar nota</button>`:''}
         </div>
       </div>`;
     });
     h+='</div></div>';
   }
   if(entregues.length){
-    h+=`<div class="card">
+    h+=`<div class="card" style="margin-bottom:.75rem;">
       <div style="font-size:11px;font-weight:700;color:#16a34a;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px;">✓ Entregues (${entregues.length})</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
-    entregues.forEach(({c,gNome})=>{
+    entregues.forEach(({gKey,cKey,c,gNome,isMeu})=>{
+      const isLoja=!c.via;
       h+=`<div class="nf-item" style="border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;padding:10px;opacity:.85;">
+        ${renderNF(c,gNome)}
+        ${isMeu&&isLoja?`<div style="margin-top:8px;text-align:center;"><button onclick="cancelarNotaFiscal('${gKey}','${cKey}')" style="width:100%;padding:6px;font-size:12px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">✕ Cancelar nota</button></div>`:''}
+      </div>`;
+    });
+    h+='</div></div>';
+  }
+  if(canceladas.length){
+    h+=`<div class="card">
+      <div style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px;">❌ Canceladas (${canceladas.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
+    canceladas.forEach(({c,gNome})=>{
+      h+=`<div class="nf-item" style="border:1px solid #d1d5db;border-radius:10px;background:#f9fafb;padding:10px;opacity:.5;filter:grayscale(.7);">
         ${renderNF(c,gNome)}
       </div>`;
     });
     h+='</div></div>';
   }
-  const nPendentes=pendentes.length, nEntregues=entregues.length;
+  const nPendentes=pendentes.length, nEntregues=entregues.length, nCanceladas=canceladas.length;
   const resumo=`<div class="card" style="margin-bottom:.75rem;">
-    <div class="grid-3" style="margin:0;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       <div class="metric-card"><div class="metric-label">Pendentes</div><div class="metric-value" style="color:#dc2626;">${nPendentes}</div></div>
       <div class="metric-card"><div class="metric-label">Entregues</div><div class="metric-value" style="color:#16a34a;">${nEntregues}</div></div>
-      <div class="metric-card"><div class="metric-label">Total</div><div class="metric-value">${nPendentes+nEntregues}</div></div>
+      <div class="metric-card"><div class="metric-label">Canceladas</div><div class="metric-value" style="color:#6b7280;">${nCanceladas}</div></div>
+      <div class="metric-card"><div class="metric-label">Total</div><div class="metric-value">${nPendentes+nEntregues+nCanceladas}</div></div>
     </div>
   </div>`;
   const filtroBar=`<div style="display:flex;gap:8px;margin-bottom:.75rem;">
@@ -3762,6 +3800,26 @@ function renderEntregasProf(){
 }
 async function marcarEntregue(gKey,cKey){
   await db.ref(`grupos/${gKey}/compras/${cKey}/entregue`).set(true);
+}
+async function cancelarNotaFiscal(gKey,cKey){
+  const g=ST.grupos[gKey]; if(!g) return;
+  const c=g.compras?.[cKey]; if(!c) return;
+  if(c.cancelada){showToast('Esta nota já foi cancelada.');return;}
+  if(c.via){showToast('Só é possível cancelar compras de loja.');return;}
+  if(!confirm(`Cancelar ${c.id}?\nO dinheiro (${fmt(c.total)}) volta ao grupo e o material volta ao estoque.\nEssa ação não pode ser desfeita.`)) return;
+  const upd={};
+  upd[`grupos/${gKey}/saldo`]=(g.saldo||0)+c.total;
+  upd[`grupos/${gKey}/compras/${cKey}/cancelada`]=true;
+  Object.values(c.itens||{}).forEach(it=>{
+    const mKey=Object.entries(ST.materiais).find(([,m])=>m.nome===it.nome)?.[0];
+    if(mKey) upd[`materiais/${mKey}/estoque`]=(ST.materiais[mKey].estoque||0)+it.qty;
+  });
+  const fk=db.ref('feed').push().key;
+  upd[`feed/${fk}`]={tipo:'cancelamento',txt:`Nota ${c.id} de ${g.nome} cancelada — estorno de ${fmt(c.total)}`,data:nowStr(),ts:Date.now()};
+  try{
+    await db.ref().update(upd);
+    showToast(`${c.id} cancelada. Estorno de ${fmt(c.total)} aplicado.`);
+  }catch(e){ alert('Erro ao cancelar: '+e.message); }
 }
 
 // ── RELATÓRIOS PROFESSOR ──────────────────────────────
@@ -4625,7 +4683,8 @@ function renderRelatoriosProf(){
     const s=stats[relGrupoAtual]; if(!s){relGrupoAtual=null;}
     else{
       const gKey=s.key, g=ST.grupos[gKey]||{};
-      const compras=Object.values(g.compras||{});
+      const todasComprasRel=Object.values(g.compras||{});
+      const compras=todasComprasRel.filter(c=>!c.cancelada);
       const _si4=g.saldoInicial??g.saldo??SI(); const gastoLoja=_si4-g.saldo;
       const pctUsado=Math.min(100,Math.round((gastoLoja/_si4)*100));
       const rS=rankingSaldo(stats),rC=rankingCompras(stats),rN=rankingNeg(stats);
