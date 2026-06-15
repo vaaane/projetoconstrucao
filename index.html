@@ -1351,6 +1351,11 @@ function canProfDeliver(grupoKey) {
 
 // ── AÇÃO AUTOMÁTICA DE MERCADO ────────────────────────
 const LIMIAR_ESTOQUE_BAIXO=10;
+function getEstoqueInicial(mKey){
+  const m=ST.materiais[mKey];
+  if(m&&Number.isFinite(m.estoqueInicial)) return m.estoqueInicial;
+  return ESTOQUE_INICIAL[mKey]||100;
+}
 const ESTOQUE_INICIAL={'Isopor_1cm':30,'EVA_colorido':100,'Palito_de_picole':500,'Palito_de_churrasco':300,'Tinta_guache_comum':60,'Areia_colorida':200,'Feltro':150,'Lixa_fina':100,'Serragem':80,'Papel_kraft':100,'Papel_aluminio':80,'Glitter_grosso':60,'Pedrisco':150,'Conjunto_eletrico':5,'Esponja_verde':50,'Tinta_guache_metalica':10};
 
 async function verificarAcaoAutomatica() {
@@ -1891,7 +1896,7 @@ ${txt}</div>`;
     const kitInfo=m.kit||info.kit||''; const kitUnidade=m.unidade||info.unidade||'un.';
     const catLabel=m.cat||info.cat||'';
     // Low stock warning: < 15% of initial
-    const estoqueInicial=ESTOQUE_INICIAL[mKey]||100;
+    const estoqueInicial=getEstoqueInicial(mKey);
     const poucEstoque=!semEstoque&&m.estoque<estoqueInicial*0.15;
     const estoqueLabel=semEstoque
       ?`<div style="font-size:10px;font-weight:800;color:#94a3b8;letter-spacing:.03em;">FORA DE ESTOQUE</div>`
@@ -2128,7 +2133,7 @@ async function checkoutFromCart(){
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
-    const estoqueInicial=ESTOQUE_INICIAL[it.mKey]||100;
+    const estoqueInicial=getEstoqueInicial(it.mKey);
     if(novoEstoque>0&&novoEstoque<estoqueInicial*0.10&&(!m.acao?.fimTs||m.acao.fimTs<Date.now())){
       updates[`materiais/${it.mKey}/acao`]={tipo:'indisponivel',pct:0,fimTs:Date.now()+25*60000,auto:true};
       const fkIndisp=db.ref('feed').push().key;
@@ -2177,7 +2182,7 @@ async function finalizarCompra(){
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
-    const estoqueInicial=ESTOQUE_INICIAL[it.mKey]||100;
+    const estoqueInicial=getEstoqueInicial(it.mKey);
     if(novoEstoque>0 && novoEstoque<estoqueInicial*0.10 && (!m.acao?.fimTs||m.acao.fimTs<Date.now())){
       updates[`materiais/${it.mKey}/acao`]={tipo:'indisponivel',pct:0,fimTs:Date.now()+25*60000,auto:true};
       const fkIndisp=db.ref('feed').push().key;
@@ -2194,10 +2199,11 @@ function calcInventarioGrupo(gNome){
   const g=ST.grupos[gKey]; if(!g) return {};
   const comprados={};
   Object.values(g.compras||{}).forEach(c=>{
+    if(c.cancelada) return;
     Object.values(c.itens||{}).forEach(i=>{ comprados[i.nome]=(comprados[i.nome]||0)+i.qty; });
   });
   // subtract already resold
-  Object.values(ST.transacoes||{}).forEach(t=>{
+  Object.values(ST.transacoes||[]).forEach(t=>{
     if(t.vendedor===gNome&&t.via==='revenda') comprados[t.item]=(comprados[t.item]||0)-t.qty;
   });
   return comprados;
@@ -3117,7 +3123,7 @@ function renderAcoesProf(){
         <div class="section-title">Ajuste de estoque</div>
         ${Object.entries(ST.materiais).sort(([,a],[,b])=>{const az=a.estoque<=0,bz=b.estoque<=0;if(az!==bz)return az?1:-1;return(a.nome||'').localeCompare(b.nome||'');}).map(([mKey,m])=>{
           const info=MAT_INFO[mKey]||{emoji:'📦'};
-          const ini=ESTOQUE_INICIAL[mKey]||100;
+          const ini=getEstoqueInicial(mKey);
           const vendido=Math.max(0,ini-m.estoque);
           const pct=Math.round((m.estoque/ini)*100);
           const cor=pct>50?'#16a34a':pct>20?'#d97706':'#dc2626';
@@ -3755,7 +3761,7 @@ function renderLojaProf(){
     const al=getAcaoLabel(m.nome);
     const oculto=!!m.oculto;
     const semEstoque=m.estoque<=0;
-    const ini=ESTOQUE_INICIAL[mKey]||100;
+    const ini=getEstoqueInicial(mKey);
     const pct=Math.min(100,Math.round((m.estoque/ini)*100));
     const corBar=pct>50?'#16a34a':pct>15?'#d97706':'#dc2626';
     const isOferta=al&&m.acao?.tipo==='oferta';
@@ -4107,6 +4113,13 @@ function abrirEditarItemModal(mKey){
         <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">UNIDADE</label>
           <input id="ei-unidade" class="input-field" type="text" value="${m.unidade||'un.'}" style="font-size:13px;padding:9px 10px;"></div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">ESTOQUE ATUAL</label>
+          <input id="ei-estoque" class="input-field" type="number" min="0" step="1" value="${m.estoque||0}" style="font-size:13px;padding:9px 10px;"></div>
+        <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">ESTOQUE INICIAL (ref.)</label>
+          <input id="ei-estoque-ini" class="input-field" type="number" min="0" step="1" value="${getEstoqueInicial(mKey)}" style="font-size:13px;padding:9px 10px;"></div>
+      </div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:-4px;">Dica: deixar os dois iguais zera o "vendido(s)". O inicial é a base da barra de progresso.</div>
       <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">DESCRIÇÃO DA UNIDADE</label>
         <input id="ei-kit" class="input-field" type="text" value="${(m.kit||'').replace(/"/g,'&quot;')}" placeholder="Ex: Folha A3 (30×42 cm)" style="font-size:13px;padding:9px 10px;"></div>
       <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">TEXTO "VER EXEMPLOS" (opcional)</label>
@@ -4136,10 +4149,12 @@ function salvarEdicaoItemModal(mKey){
   const unidade=(document.getElementById('ei-unidade')?.value||'').trim()||'un.';
   const kit=(document.getElementById('ei-kit')?.value||'').trim();
   const exemplos=(document.getElementById('ei-exemplos')?.value||'').trim();
+  const estoque=Math.max(0,parseInt(document.getElementById('ei-estoque')?.value)||0);
+  const estoqueInicial=Math.max(0,parseInt(document.getElementById('ei-estoque-ini')?.value)||0);
   if(!nome||preco<=0){showToast('⚠️ Preencha nome e preço.');return;}
   const fotoInput=document.getElementById('ei-foto');
   const b64=fotoInput?._b64||null;
-  db.ref('materiais/'+mKey).update({nome,cat,preco,emoji,unidade,kit}).then(async ()=>{
+  db.ref('materiais/'+mKey).update({nome,cat,preco,emoji,unidade,kit,estoque,estoqueInicial}).then(async ()=>{
     const info={};
     if(exemplos) info.exemplos=exemplos; else await db.ref('matInfo/'+mKey+'/exemplos').remove();
     if(b64) await db.ref('matInfo/'+mKey+'/imgBase64').set(b64);
