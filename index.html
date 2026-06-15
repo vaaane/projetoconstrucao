@@ -1154,6 +1154,7 @@ function setupListeners() {
     _matKeysAntes=new Set(Object.keys(novo));
     ST.materiais=novo;
     scheduleRender();
+    if(document.getElementById('screen-landing')?.style.display!=='none') atualizarLandingStats();
   });
   db.ref('transacoes').on('value', s => {
     ST.transacoes=Object.values(s.val()||{}).sort((a,b)=>(a.ts||0)-(b.ts||0));
@@ -1501,11 +1502,11 @@ function atualizarLandingStats(){
   // ── 2 cards hero ──
   const mats=ST.materiais||{};
   // 1º: item raro disponível (se houver)
-  const raros=Object.entries(mats).filter(([,m])=>isRaroAtivo(m));
+  const raros=Object.entries(mats).filter(([,m])=>isRaroAtivo(m)&&!m.oculto);
   // 2º: itens em oferta (desconto)
-  const ofertas=Object.entries(mats).filter(([k,m])=>m.acao?.tipo==='oferta'&&m.acao.fimTs>Date.now()&&m.estoque>0);
+  const ofertas=Object.entries(mats).filter(([k,m])=>m.acao?.tipo==='oferta'&&m.acao.fimTs>Date.now()&&m.estoque>0&&!m.oculto);
   // Fallback: qualquer item disponível ordenado por estoque
-  const disponiveis=Object.entries(mats).filter(([,m])=>m.estoque>0).sort((a,b)=>b[1].estoque-a[1].estoque);
+  const disponiveis=Object.entries(mats).filter(([,m])=>m.estoque>0&&!m.oculto).sort((a,b)=>b[1].estoque-a[1].estoque);
 
   // Montar lista de 2: raro primeiro, depois ofertas, depois genérico
   const candidatos=[];
