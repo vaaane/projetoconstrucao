@@ -1598,7 +1598,7 @@ function atualizarLandingStats(){
 })();
 
 let profSelecionadoKey='';
-const PROF_SENHA='1249';
+const PROF_SENHA='1240';
 function irProf(){ sh('step-grupo','none'); sh('step-prof','block'); }
 function voltarLogin(){ sh('step-grupo','block'); sh('step-pin','none'); sh('step-prof','none'); document.getElementById('pin-erro').style.display='none'; pinDigitado=''; grupoSelecionado=''; profSelecionadoKey=''; const pi=document.getElementById('pin-input-text'); if(pi) pi.value=''; }
 function checkProfSenha(){
@@ -4905,6 +4905,15 @@ async function zerarTodosVendidos(){
   showToast(`✅ Vendidos zerados em ${n} itens.`);
 }
 window.zerarTodosVendidos=zerarTodosVendidos;
+async function atualizarSenhasProfessores(novaSenha){
+  const snap=await db.ref('professores').once('value');
+  const profs=snap.val()||{};
+  const updates={};
+  Object.keys(profs).forEach(k=>{ updates[`professores/${k}/senha`]=novaSenha; });
+  await db.ref().update(updates);
+  showToast(`✅ Senha de ${Object.keys(profs).length} professor(es) atualizada para '${novaSenha}'.`);
+}
+window.atualizarSenhasProfessores=atualizarSenhasProfessores;
 setupListeners();
 migrarCategorias();
 setInterval(verificarExpiracoes, 30000);
