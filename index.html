@@ -1002,10 +1002,11 @@ function getAcaoLabel(nomeItem) {
   const m = ST.materiais[chave(nomeItem)];
   if (!m?.acao?.fimTs || m.acao.fimTs < Date.now()) return null;
   const a = m.acao, mins = Math.max(0,Math.ceil((a.fimTs-Date.now())/60000));
-  if (a.tipo==='oferta')       return {txt:`${a.pct}% OFF`,   cor:'#16a34a', mins};
-  if (a.tipo==='alta')         return {txt:`+${a.pct}%`,      cor:'#dc2626', mins};
-  if (a.tipo==='escassez')     return {txt:'Escassez!',        cor:'#d97706', mins};
-  if (a.tipo==='indisponivel') return {txt:'Indisponível',     cor:'#dc2626', mins};
+  if ((a.tipo==='oferta'||a.tipo==='alta'||a.tipo==='escassez') && (m.estoque||0)<=0) return null;
+  if (a.tipo==='oferta')       return {txt:`${a.pct}% OFF`,   cor:'#16a34a', tipo:a.tipo, mins};
+  if (a.tipo==='alta')         return {txt:`+${a.pct}%`,      cor:'#dc2626', tipo:a.tipo, mins};
+  if (a.tipo==='escassez')     return {txt:'Escassez!',        cor:'#d97706', tipo:a.tipo, mins};
+  if (a.tipo==='indisponivel') return {txt:'Indisponível',     cor:'#dc2626', tipo:a.tipo, mins};
   return null;
 }
 
@@ -1356,6 +1357,12 @@ function getEstoqueInicial(mKey){
   if(m&&Number.isFinite(m.estoqueInicial)) return m.estoqueInicial;
   return ESTOQUE_INICIAL[mKey]||100;
 }
+function getVendido(mKey){
+  const m=ST.materiais[mKey];
+  if(m&&Number.isFinite(m.vendido)) return m.vendido;
+  const ini=(m&&Number.isFinite(m.estoqueInicial))?m.estoqueInicial:(ESTOQUE_INICIAL[mKey]||100);
+  return Math.max(0,ini-(m?.estoque||0));
+}
 const ESTOQUE_INICIAL={'Isopor_1cm':30,'EVA_colorido':100,'Palito_de_picole':500,'Palito_de_churrasco':300,'Tinta_guache_comum':60,'Areia_colorida':200,'Feltro':150,'Lixa_fina':100,'Serragem':80,'Papel_kraft':100,'Papel_aluminio':80,'Glitter_grosso':60,'Pedrisco':150,'Conjunto_eletrico':5,'Esponja_verde':50,'Tinta_guache_metalica':10};
 
 async function verificarAcaoAutomatica() {
@@ -1370,7 +1377,7 @@ async function verificarAcaoAutomatica() {
   const ativas=Object.entries(ST.materiais).filter(([,m])=>m.acao?.fimTs&&m.acao.fimTs>agora);
   if(ativas.length>=2) return;
   // Materiais sem acao ativa
-  const disponiveis=Object.entries(ST.materiais).filter(([,m])=>!m.acao?.fimTs||m.acao.fimTs<agora);
+  const disponiveis=Object.entries(ST.materiais).filter(([,m])=>(!m.acao?.fimTs||m.acao.fimTs<agora)&&(m.estoque||0)>0&&!m.oculto);
   if(!disponiveis.length) return;
   // Atualizar timestamp primeiro (evitar concorrência)
   await db.ref('config/ultimaAcaoAuto').set(agora);
@@ -2031,6 +2038,17 @@ async function confirmarCompraKit(kKey){
     showToast(`✅ Kit "${kit.nome}" comprado!`);
   }catch(e){showToast('Erro: '+e.message);}
 }
+function abrirConteudoKit(){
+  abrirModal('Conteúdo do Kit Base',`
+    <ul style="margin:0;padding-left:18px;font-size:13px;color:#334155;line-height:1.7;">
+      <li>3 folhas de isopor</li>
+      <li>2 folhas de EVA colorido</li>
+      <li>100 palitos de picolé</li>
+      <li>50 palitos de dente</li>
+    </ul>
+    <p style="font-size:12px;color:#64748b;margin-top:10px;">Compra única — um kit por grupo.</p>`,
+    [{txt:'Fechar',cls:'btn-secondary',fn:'fecharModal()'}]);
+}
 function atualizarTotalCarrinho(){
   updateCartBadge();
 }
@@ -2068,6 +2086,7 @@ function renderCarrinho(){
         <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
           <span style="font-size:10px;color:${estoqueCor};font-weight:600;">${m.estoque<5?'⚠️ ':''} Estoque: ${m.estoque}</span>
         </div>
+        ${mKey==='Kit_Base'?`<button onclick="abrirConteudoKit()" style="font-size:11px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:3px 8px;cursor:pointer;margin-top:4px;">📦 Ver conteúdo do kit</button>`:''}
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
         <button class="qty-btn" onclick="setCartQty('${mKey}',${qty-1})" style="width:26px;height:26px;font-size:14px;">−</button>
@@ -2132,7 +2151,9 @@ async function checkoutFromCart(){
     const m=ST.materiais[it.mKey]; if(!m) continue;
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
+    updates[`materiais/${it.mKey}/vendido`]=(m.vendido||0)+it.qty;
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
+    if(novoEstoque<=0&&['oferta','alta','escassez'].includes(m.acao?.tipo)) updates[`materiais/${it.mKey}/acao`]=null;
     const estoqueInicial=getEstoqueInicial(it.mKey);
     if(novoEstoque>0&&novoEstoque<estoqueInicial*0.10&&(!m.acao?.fimTs||m.acao.fimTs<Date.now())){
       updates[`materiais/${it.mKey}/acao`]={tipo:'indisponivel',pct:0,fimTs:Date.now()+25*60000,auto:true};
@@ -2181,7 +2202,9 @@ async function finalizarCompra(){
     const m=ST.materiais[it.mKey]; if(!m) continue;
     const novoEstoque=m.estoque-it.qty;
     updates[`materiais/${it.mKey}/estoque`]=novoEstoque;
+    updates[`materiais/${it.mKey}/vendido`]=(m.vendido||0)+it.qty;
     if(novoEstoque<=0&&m.raro) updates[`materiais/${it.mKey}/raro`]=null;
+    if(novoEstoque<=0&&['oferta','alta','escassez'].includes(m.acao?.tipo)) updates[`materiais/${it.mKey}/acao`]=null;
     const estoqueInicial=getEstoqueInicial(it.mKey);
     if(novoEstoque>0 && novoEstoque<estoqueInicial*0.10 && (!m.acao?.fimTs||m.acao.fimTs<Date.now())){
       updates[`materiais/${it.mKey}/acao`]={tipo:'indisponivel',pct:0,fimTs:Date.now()+25*60000,auto:true};
@@ -3123,9 +3146,9 @@ function renderAcoesProf(){
         <div class="section-title">Ajuste de estoque</div>
         ${Object.entries(ST.materiais).sort(([,a],[,b])=>{const az=a.estoque<=0,bz=b.estoque<=0;if(az!==bz)return az?1:-1;return(a.nome||'').localeCompare(b.nome||'');}).map(([mKey,m])=>{
           const info=MAT_INFO[mKey]||{emoji:'📦'};
-          const ini=getEstoqueInicial(mKey);
-          const vendido=Math.max(0,ini-m.estoque);
-          const pct=Math.round((m.estoque/ini)*100);
+          const vendido=getVendido(mKey);
+          const base=(m.estoque||0)+vendido;
+          const pct=base>0?Math.min(100,Math.round((m.estoque/base)*100)):100;
           const cor=pct>50?'#16a34a':pct>20?'#d97706':'#dc2626';
           const raroTag=m.raro?`<span style="font-size:10px;background:#fffbeb;color:#ca8a04;border:1px solid #fde68a;border-radius:5px;padding:1px 5px;font-weight:700;">✨RARO</span>`:'';
           const oculto=!!m.oculto;
@@ -3153,6 +3176,7 @@ function renderAcoesProf(){
               <button onclick="confirmarZerarEstoque('${mKey}')" style="flex:1;min-width:80px;border:1px solid #fde68a;border-radius:7px;background:#fffbeb;cursor:pointer;font-size:11px;padding:5px 0;color:#92400e;font-weight:700;">Zerar estoque</button>
               <button onclick="confirmarToggleOculto('${mKey}')" style="flex:1;min-width:90px;border:1px solid ${oculto?'#bbf7d0':'#fecaca'};border-radius:7px;background:${oculto?'#f0fdf4':'#fef2f2'};cursor:pointer;font-size:11px;padding:5px 0;color:${oculto?'#16a34a':'#dc2626'};font-weight:700;">${oculto?'↩ Recolocar na loja':'Retirar da loja'}</button>
               <button onclick="confirmarExcluirItem('${mKey}')" style="border:1px solid #fecaca;border-radius:7px;background:#fef2f2;cursor:pointer;font-size:11px;padding:5px 10px;color:#dc2626;font-weight:700;" title="Apagar permanentemente">🗑 Excluir</button>
+              ${vendido>0?`<button onclick="db.ref('materiais/${mKey}/vendido').set(0).then(()=>showToast('Vendidos zerados.'))" style="flex:1;min-width:80px;border:1px solid #e9d5ff;border-radius:7px;background:#faf5ff;cursor:pointer;font-size:11px;padding:5px 0;color:#7c3aed;font-weight:700;">↺ Zerar vendidos</button>`:''}
             </div>
           </div>`;
         }).join('')}
@@ -3699,7 +3723,10 @@ async function cancelarNotaFiscal(gKey,cKey,modo='cancelamento'){
   upd[`grupos/${gKey}/compras/${cKey}/cancelada`]=true;
   Object.values(c.itens||{}).forEach(it=>{
     const mKey=Object.entries(ST.materiais).find(([,m])=>m.nome===it.nome)?.[0];
-    if(mKey) upd[`materiais/${mKey}/estoque`]=(ST.materiais[mKey].estoque||0)+it.qty;
+    if(mKey){
+      upd[`materiais/${mKey}/estoque`]=(ST.materiais[mKey].estoque||0)+it.qty;
+      upd[`materiais/${mKey}/vendido`]=Math.max(0,(ST.materiais[mKey].vendido||0)-it.qty);
+    }
   });
   const fk=db.ref('feed').push().key;
   upd[`feed/${fk}`]={tipo:'cancelamento',txt:`Nota ${c.id} de ${g.nome} cancelada — estorno de ${fmt(c.total)}`,data:nowStr(),ts:Date.now()};
@@ -3761,8 +3788,9 @@ function renderLojaProf(){
     const al=getAcaoLabel(m.nome);
     const oculto=!!m.oculto;
     const semEstoque=m.estoque<=0;
-    const ini=getEstoqueInicial(mKey);
-    const pct=Math.min(100,Math.round((m.estoque/ini)*100));
+    const vendidoLoja=getVendido(mKey);
+    const baseLoja=(m.estoque||0)+vendidoLoja;
+    const pct=baseLoja>0?Math.min(100,Math.round((m.estoque/baseLoja)*100)):100;
     const corBar=pct>50?'#16a34a':pct>15?'#d97706':'#dc2626';
     const isOferta=al&&m.acao?.tipo==='oferta';
     const isAlta=al&&m.acao?.tipo==='alta';
@@ -3794,7 +3822,7 @@ function renderLojaProf(){
         <div class="prod-preco" style="color:${precoCor};">${fmt(preco)}</div>
         <div style="height:4px;background:#f1f5f9;border-radius:2px;margin:4px 0 3px;"><div style="height:100%;width:${pct}%;background:${corBar};border-radius:2px;transition:width .4s;"></div></div>
         <div style="font-size:10px;color:${corBar};font-weight:600;">${m.estoque} ${kitUnidade} em estoque</div>
-        ${Math.max(0,ini-m.estoque)>0?`<div style="font-size:10px;color:#7c3aed;font-weight:600;">${Math.max(0,ini-m.estoque)} vendido(s)</div>`:''}
+        ${vendidoLoja>0?`<div style="font-size:10px;color:#7c3aed;font-weight:600;">${vendidoLoja} vendido(s)</div>`:''}
       </div>
       <div class="prod-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:8px;">
         <button onclick="abrirEditarPreco('${mKey}')" class="btn-sm" style="font-size:11px;padding:5px 0;text-align:center;">✏️ Preço</button>
@@ -4113,13 +4141,8 @@ function abrirEditarItemModal(mKey){
         <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">UNIDADE</label>
           <input id="ei-unidade" class="input-field" type="text" value="${m.unidade||'un.'}" style="font-size:13px;padding:9px 10px;"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">ESTOQUE ATUAL</label>
-          <input id="ei-estoque" class="input-field" type="number" min="0" step="1" value="${m.estoque||0}" style="font-size:13px;padding:9px 10px;"></div>
-        <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">ESTOQUE INICIAL (ref.)</label>
-          <input id="ei-estoque-ini" class="input-field" type="number" min="0" step="1" value="${getEstoqueInicial(mKey)}" style="font-size:13px;padding:9px 10px;"></div>
-      </div>
-      <div style="font-size:10px;color:#94a3b8;margin-top:-4px;">Dica: deixar os dois iguais zera o "vendido(s)". O inicial é a base da barra de progresso.</div>
+      <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">ESTOQUE ATUAL</label>
+        <input id="ei-estoque" class="input-field" type="number" min="0" step="1" value="${m.estoque||0}" style="font-size:13px;padding:9px 10px;"></div>
       <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">DESCRIÇÃO DA UNIDADE</label>
         <input id="ei-kit" class="input-field" type="text" value="${(m.kit||'').replace(/"/g,'&quot;')}" placeholder="Ex: Folha A3 (30×42 cm)" style="font-size:13px;padding:9px 10px;"></div>
       <div><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">TEXTO "VER EXEMPLOS" (opcional)</label>
@@ -4150,11 +4173,10 @@ function salvarEdicaoItemModal(mKey){
   const kit=(document.getElementById('ei-kit')?.value||'').trim();
   const exemplos=(document.getElementById('ei-exemplos')?.value||'').trim();
   const estoque=Math.max(0,parseInt(document.getElementById('ei-estoque')?.value)||0);
-  const estoqueInicial=Math.max(0,parseInt(document.getElementById('ei-estoque-ini')?.value)||0);
   if(!nome||preco<=0){showToast('⚠️ Preencha nome e preço.');return;}
   const fotoInput=document.getElementById('ei-foto');
   const b64=fotoInput?._b64||null;
-  db.ref('materiais/'+mKey).update({nome,cat,preco,emoji,unidade,kit,estoque,estoqueInicial}).then(async ()=>{
+  db.ref('materiais/'+mKey).update({nome,cat,preco,emoji,unidade,kit,estoque}).then(async ()=>{
     const info={};
     if(exemplos) info.exemplos=exemplos; else await db.ref('matInfo/'+mKey+'/exemplos').remove();
     if(b64) await db.ref('matInfo/'+mKey+'/imgBase64').set(b64);
@@ -4821,6 +4843,17 @@ async function verificarExpiracoes(){
 }
 
 // ── INICIALIZAÇÃO ─────────────────────────────────────
+async function zerarTodosVendidos(){
+  const snap=await db.ref('materiais').once('value');
+  const mats=snap.val()||{};
+  const updates={};
+  let n=0;
+  Object.keys(mats).forEach(mKey=>{ updates[`materiais/${mKey}/vendido`]=0; n++; });
+  await db.ref().update(updates);
+  console.log(`zerarTodosVendidos: ${n} item(ns) zerado(s).`);
+  showToast(`✅ Vendidos zerados em ${n} itens.`);
+}
+window.zerarTodosVendidos=zerarTodosVendidos;
 setupListeners();
 migrarCategorias();
 setInterval(verificarExpiracoes, 30000);
