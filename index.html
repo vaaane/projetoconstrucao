@@ -1363,6 +1363,18 @@ function getVendido(mKey){
   const ini=(m&&Number.isFinite(m.estoqueInicial))?m.estoqueInicial:(ESTOQUE_INICIAL[mKey]||100);
   return Math.max(0,ini-(m?.estoque||0));
 }
+function ehKitBasico(mKey){
+  const m=ST.materiais[mKey];
+  if(!m) return false;
+  return mKey==='Kit_Base'||mKey==='Kit_Basico'||/kit\s*b[áa]sico/i.test(m.nome||'');
+}
+function grupoJaTemKit(g){
+  if(!g||!g.compras) return false;
+  return Object.values(g.compras).some(c=>{
+    if(c.cancelada) return false;
+    return Object.values(c.itens||{}).some(it=>/kit\s*b[áa]sico/i.test(it.nome||''));
+  });
+}
 const ESTOQUE_INICIAL={'Isopor_1cm':30,'EVA_colorido':100,'Palito_de_picole':500,'Palito_de_churrasco':300,'Tinta_guache_comum':60,'Areia_colorida':200,'Feltro':150,'Lixa_fina':100,'Serragem':80,'Papel_kraft':100,'Papel_aluminio':80,'Glitter_grosso':60,'Pedrisco':150,'Conjunto_eletrico':5,'Esponja_verde':50,'Tinta_guache_metalica':10};
 
 async function verificarAcaoAutomatica() {
@@ -1877,7 +1889,8 @@ function renderLoja(){
     const isOferta=al&&m.acao?.tipo==='oferta';
     const isAlta=al&&m.acao?.tipo==='alta';
     const isEscassez=al&&m.acao?.tipo==='escassez';
-    const maxInput=m.estoque;
+    const jaTemKit=ehKitBasico(mKey)&&grupoJaTemKit(g);
+    const maxInput=ehKitBasico(mKey)?Math.min(1,m.estoque):m.estoque;
     const cb=(bg,txt,big)=>`<div class="prod-corner-badge" style="background:${bg};${big?'font-size:11px;padding:4px 8px;':''}">
 ${txt}</div>`;
     const isNovo=m._novoAte&&m._novoAte>Date.now();
@@ -1932,7 +1945,9 @@ ${txt}</div>`;
       <div class="prod-actions">
         ${semEstoque
           ?`<div style="text-align:center;padding:10px 0;font-size:12px;font-weight:700;color:#94a3b8;">Fora de estoque</div>`
-          :`<div class="qty-row">
+          :jaTemKit
+            ?`<div style="text-align:center;padding:10px 0;font-size:12px;font-weight:700;color:#16a34a;">✓ Já adquirido</div>`
+            :`<div class="qty-row">
           <button class="qty-btn" onclick="(()=>{const i=document.getElementById('qty-${mKey}');if(i&&parseInt(i.value)>0)i.value=parseInt(i.value)-1;})()">−</button>
           <input type="number" min="0" max="${maxInput}" value="0" id="qty-${mKey}" class="qty-field" placeholder="0">
           <button class="qty-btn" onclick="(()=>{const i=document.getElementById('qty-${mKey}');if(i)i.value=Math.min(parseInt(i.value||0)+1,${maxInput});})()">+</button>
@@ -2130,6 +2145,10 @@ async function checkoutFromCart(){
   for(const [mKey,qty] of Object.entries(cartState)){
     if(qty<=0) continue;
     const m=ST.materiais[mKey]; if(!m) continue;
+    if(ehKitBasico(mKey)){
+      if(qty>1){alert('O Kit Básico é limitado a 1 unidade por grupo.');return;}
+      if(grupoJaTemKit(g)){alert('Seu grupo já comprou o Kit Básico. É permitido apenas 1 por grupo.');return;}
+    }
     if(qty>m.estoque){alert(`Estoque insuficiente de ${m.nome}: apenas ${m.estoque} disponíveis.`);return;}
     const preco=getPrecoAtual(m.nome);
     itensSel[nItens]={nome:m.nome,qty,preco,mKey}; total+=qty*preco; nItens++;
@@ -2179,6 +2198,10 @@ async function finalizarCompra(){
   for(const [mKey,m] of Object.entries(ST.materiais)){
     const el=document.getElementById('qty-'+mKey); if(!el) continue;
     const qty=parseInt(el.value)||0; if(qty<=0) continue;
+    if(ehKitBasico(mKey)){
+      if(qty>1){alert('O Kit Básico é limitado a 1 unidade por grupo.');return;}
+      if(grupoJaTemKit(g)){alert('Seu grupo já comprou o Kit Básico. É permitido apenas 1 por grupo.');return;}
+    }
     if(qty>m.estoque){alert(`Estoque insuficiente de ${m.nome}: apenas ${m.estoque} disponíveis.`);return;}
     const preco=getPrecoAtual(m.nome);
     itensSel[nItens]={nome:m.nome,qty,preco,mKey};
@@ -3062,7 +3085,10 @@ function renderPainelProf(){
   document.getElementById('tab-painel').innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
       <div style="font-size:12px;color:#64748b;">Logado como <strong style="color:#0f172a;">${p?.nome||profAtual}</strong></div>
-      <button onclick="confirmarTogglePausa()" style="padding:7px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:${pausado?'#dc2626':'#2563eb'};color:#fff;">${pausado?'▶ Retomar simulação':'⏸ Pausar simulação'}</button>
+      <div style="display:flex;gap:8px;">
+        <button onclick="zerarAtividade()" style="padding:7px 16px;border:1px solid #f97316;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#fff7ed;color:#c2410c;">🧹 Zerar atividade</button>
+        <button onclick="confirmarTogglePausa()" style="padding:7px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:${pausado?'#dc2626':'#2563eb'};color:#fff;">${pausado?'▶ Retomar simulação':'⏸ Pausar simulação'}</button>
+      </div>
     </div>
     ${pausado?`<div style="background:#fff7ed;border:2px solid #f97316;border-radius:10px;padding:10px 14px;margin-bottom:.75rem;font-size:13px;font-weight:700;color:#c2410c;">⏸ Simulação pausada — grupos não podem comprar ou vender</div>`:''}
     <div class="grid-3" style="margin-bottom:.75rem;">
@@ -4843,6 +4869,31 @@ async function verificarExpiracoes(){
 }
 
 // ── INICIALIZAÇÃO ─────────────────────────────────────
+async function zerarAtividade(){
+  if(!confirm('Zerar a ATIVIDADE?\n\nApaga todas as compras, notas, feed, mercado e vendidos, e devolve o saldo cheio a cada grupo.\n\nGrupos, turmas, alunos, materiais e preços são PRESERVADOS.\n\nNão pode ser desfeito.')) return;
+  const updates={};
+  const gSnap=await db.ref('grupos').once('value');
+  const grupos=gSnap.val()||{};
+  Object.entries(grupos).forEach(([gKey,g])=>{
+    updates[`grupos/${gKey}/compras`]=null;
+    const saldoBase=(g.saldoInicial!=null)?g.saldoInicial:(ST.config?.saldoInicial??60000);
+    updates[`grupos/${gKey}/saldo`]=saldoBase;
+  });
+  const mSnap=await db.ref('materiais').once('value');
+  const mats=mSnap.val()||{};
+  Object.entries(mats).forEach(([mKey,m])=>{
+    updates[`materiais/${mKey}/vendido`]=0;
+    if(m.acao&&m.acao.tipo!=='raro') updates[`materiais/${mKey}/acao`]=null;
+  });
+  updates['feed']=null;
+  updates['transacoes']=null;
+  updates['propostas']=null;
+  updates['filaAcoes']=null;
+  await db.ref().update(updates);
+  showToast('✅ Atividade zerada. Configuração preservada.');
+  console.log('zerarAtividade: movimento apagado, saldos restaurados, configuração intacta.');
+}
+window.zerarAtividade=zerarAtividade;
 async function zerarTodosVendidos(){
   const snap=await db.ref('materiais').once('value');
   const mats=snap.val()||{};
