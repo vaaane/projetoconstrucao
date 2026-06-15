@@ -3086,7 +3086,6 @@ function renderPainelProf(){
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
       <div style="font-size:12px;color:#64748b;">Logado como <strong style="color:#0f172a;">${p?.nome||profAtual}</strong></div>
       <div style="display:flex;gap:8px;">
-        <button onclick="zerarAtividade()" style="padding:7px 16px;border:1px solid #f97316;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#fff7ed;color:#c2410c;">🧹 Zerar atividade</button>
         <button onclick="confirmarTogglePausa()" style="padding:7px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:${pausado?'#dc2626':'#2563eb'};color:#fff;">${pausado?'▶ Retomar simulação':'⏸ Pausar simulação'}</button>
       </div>
     </div>
